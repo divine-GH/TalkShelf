@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}笔记 — note-brain{% endblock %}
+
+{% block content %}
+<h1>笔记列表</h1>
+
+<form class="filter-form" method="get" action="/notes">
+  <input type="search" name="q" value="{{ cur_q }}" placeholder="搜索关键词…">
+  <button type="submit" class="btn">搜索</button>
+</form>
+
+<div class="filter-row">
+  <div class="chip-row">
+    <a class="chip {% if not cur_category %}on{% endif %}" href="/notes?{% if cur_kind %}kind={{ cur_kind }}&{% endif %}{% if cur_q %}q={{ cur_q }}&{% endif %}">全部</a>
+    {% for cat in categories %}
+    <a class="chip {% if cur_category == cat %}on{% endif %}"
+       href="/notes?category={{ cat }}{% if cur_kind %}&kind={{ cur_kind }}{% endif %}{% if cur_q %}&q={{ cur_q }}{% endif %}">{{ cat }}</a>
+    {% endfor %}
+  </div>
+  <div class="chip-row kind-row">
+    <a class="chip {% if not cur_kind %}on{% endif %}" href="/notes?{% if cur_category %}category={{ cur_category }}&{% endif %}{% if cur_q %}q={{ cur_q }}&{% endif %}">全部</a>
+    <a class="chip {% if cur_kind == 'note' %}on{% endif %}"
+       href="/notes?kind=note{% if cur_category %}&category={{ cur_category }}{% endif %}{% if cur_q %}&q={{ cur_q }}{% endif %}">收藏</a>
+    <a class="chip {% if cur_kind == 'interest' %}on{% endif %}"
+       href="/notes?kind=interest{% if cur_category %}&category={{ cur_category }}{% endif %}{% if cur_q %}&q={{ cur_q }}{% endif %}">兴趣</a>
+  </div>
+</div>
+
+{% if data['items'] %}
+<ul class="note-list">
+  {% for n in data['items'] %}
+  <li class="note-item">
+    <div class="note-head">
+      <span class="badge kind-{{ n.kind }}">{{ '兴趣' if n.kind == 'interest' else '收藏' }}</span>
+      {% if n.category %}<span class="badge">{{ n.category }}</span>{% endif %}
+      {% if n.status == 'pending' %}<span class="badge badge-warn">整理中</span>{% endif %}
+      {% if n.status == 'failed' %}<span class="badge badge-warn">整理失败</span>{% endif %}
+      {% if n.status == 'duplicate' %}<span class="badge badge-warn">疑似重复</span>{% endif %}
+    </div>
+    <div class="note-title">{{ n.title or n.raw[:40] }}</div>
+    {% if n.summary %}<div class="note-summary">{{ n.summary }}</div>{% endif %}
+    {% if n.content and n.content != n.summary %}<div class="note-content-preview">{{ n.content[:120] }}{% if n.content|length > 120 %}…{% endif %}</div>{% endif %}
+    {% if n.tags %}<div class="note-tags">{% for t in n.tags %}<span class="tag">#{{ t }}</span>{% endfor %}</div>{% endif %}
+    <div class="note-meta">
+      <span>{{ n.created_at }}</span>
+      {% if n.source_url %}<a class="source-link" href="{{ n.source_url }}" target="_blank" rel="noopener">来源 ↗</a>{% endif %}
+    </div>
+    <details class="raw-details"><summary>原文（raw）</summary><pre class="raw-text">{{ n.raw }}</pre></details>
+  </li>
+  {% endfor %}
+</ul>
+
+<div class="pager">
+  {% if data.page > 1 %}
+  <a class="btn" href="/notes?page={{ data.page - 1 }}{% if cur_category %}&category={{ cur_category }}{% endif %}{% if cur_kind %}&kind={{ cur_kind }}{% endif %}{% if cur_q %}&q={{ cur_q }}{% endif %}">← 上一页</a>
+  {% else %}<span></span>{% endif %}
+  <span class="page-info">第 {{ data.page }} / {{ data.pages }} 页（共 {{ data.total }} 条）</span>
+  {% if data.page < data.pages %}
+  <a class="btn" href="/notes?page={{ data.page + 1 }}{% if cur_category %}&category={{ cur_category }}{% endif %}{% if cur_kind %}&kind={{ cur_kind }}{% endif %}{% if cur_q %}&q={{ cur_q }}{% endif %}">下一页 →</a>
+  {% else %}<span></span>{% endif %}
+</div>
+{% else %}
+<p class="empty">没有符合条件的笔记。</p>
+{% endif %}
+{% endblock %}

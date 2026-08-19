@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}记录 — note-brain{% endblock %}
+
+{% block content %}
+<section class="record-entry">
+  <h1>记点什么</h1>
+  <p class="hint">像跟助理说话一样：口语片段、链接 + 描述都行。AI 先帮你整理，你拍板后才入库。</p>
+  <form id="record-form" class="record-form">
+    <textarea id="record-input" rows="3" placeholder="例如：今天发现 nginx client_max_body_size 默认 1M，上传大文件被拒，帮我记下 https://example.com/…" autofocus></textarea>
+    <button type="submit" class="btn btn-primary btn-lg">开始记录</button>
+  </form>
+  <p id="record-error" class="error" hidden></p>
+</section>
+
+{% if drafts %}
+<section class="section">
+  <h2>未拍板的草稿</h2>
+  <ul class="draft-list">
+    {% for d in drafts %}
+    <li class="draft-item">
+      <a href="/conversations/{{ d.id }}" class="draft-link">
+        <span class="draft-preview">{{ d.preview or '（空草稿）' }}</span>
+        <span class="draft-time">{{ d.updated_at or '' }}</span>
+      </a>
+      <button class="btn btn-small btn-danger draft-discard" data-id="{{ d.id }}">放弃</button>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="section">
+  <h2>最近笔记</h2>
+  {% if recent %}
+  <ul class="note-list">
+    {% for n in recent %}
+    <li class="note-item">
+      <div class="note-head">
+        <span class="badge kind-{{ n.kind }}">{{ '兴趣' if n.kind == 'interest' else '收藏' }}</span>
+        {% if n.category %}<span class="badge">{{ n.category }}</span>{% endif %}
+        {% if n.status == 'duplicate' %}<span class="badge badge-warn">疑似重复</span>{% endif %}
+      </div>
+      <div class="note-title">{{ n.title or n.raw[:40] }}</div>
+      {% if n.summary %}<div class="note-summary">{{ n.summary }}</div>{% endif %}
+      {% if n.tags %}<div class="note-tags">{% for t in n.tags %}<span class="tag">#{{ t }}</span>{% endfor %}</div>{% endif %}
+      <div class="note-meta">{{ n.created_at }}</div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">还没有笔记，从上面开始记第一条吧。</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block script %}
+<script>
+  document.getElementById('record-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const input = document.getElementById('record-input');
+    const err = document.getElementById('record-error');
+    const msg = input.value.trim();
+    if (!msg) return;
+    err.hidden = true;
+    const btn = this.querySelector('button');
+    btn.disabled = true;
+    try {
+      const resp = await fetch('/api/conversations', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: msg}),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+      location.href = '/conversations/' + data.conversation_id;
+    } catch (ex) {
+      err.textContent = '发起记录失败：' + ex.message;
+      err.hidden = false;
+      btn.disabled = false;
+    }
+  });
+
+  document.querySelectorAll('.draft-discard').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      if (!confirm('放弃这段草稿？内容将删除。')) return;
+      const resp = await fetch('/api/conversations/' + btn.dataset.id, {method: 'DELETE'});
+      if (resp.ok) location.reload();
+    });
+  });
+</script>
+{% endblock %}

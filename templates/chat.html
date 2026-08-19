@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}记录对话 — note-brain{% endblock %}
+
+{% block content %}
+<div class="chat-page">
+  <div class="chat-head">
+    <a href="/" class="back">← 首页</a>
+    <span class="chat-id">对话 #{{ conv.id }}</span>
+    {% if conv.context_note_id %}<span class="badge badge-warn">修正笔记 #{{ conv.context_note_id }}</span>{% endif %}
+  </div>
+
+  <div id="messages" class="messages">
+    {% for m in messages %}
+    <div class="msg msg-{{ m.role }} msg-{{ m.kind }}">
+      {% if m.kind == 'fetched_page' %}
+      <div class="msg-material" title="抓取的网页正文（来源材料，不参与检索索引的对话消息）">
+        <pre>{{ m.content }}</pre>
+      </div>
+      {% else %}
+      <div class="msg-text">{{ m.content }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if conv.status == 'draft' %}
+  <form id="chat-form" class="chat-form">
+    <textarea id="chat-input" rows="2" placeholder="继续补充，或直接拍板保存…"></textarea>
+    <button type="submit" class="btn btn-primary">发送</button>
+  </form>
+  <div class="confirm-bar">
+    <button id="confirm-note" class="btn btn-primary btn-lg">✓ 记下来（收藏）</button>
+    <button id="confirm-interest" class="btn btn-lg">★ 先记到兴趣清单</button>
+    <button id="discard" class="btn btn-danger btn-lg">放弃草稿</button>
+  </div>
+  <p id="chat-error" class="error" hidden></p>
+  {% else %}
+  <p class="empty">这段对话已归档（{{ conv.status }}）。</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+  const convId = {{ conv.id }};
+  const messagesBox = document.getElementById('messages');
+  function scrollBottom() { messagesBox.scrollTop = messagesBox.scrollHeight; }
+  scrollBottom();
+
+  async function post(path, body) {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+    return data;
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('chat-error');
+    el.textContent = msg;
+    el.hidden = false;
+  }
+
+  function appendMsg(role, kind, content) {
+    const div = document.createElement('div');
+    div.className = 'msg msg-' + role + ' msg-' + kind;
+    if (kind === 'fetched_page') {
+      const box = document.createElement('div');
+      box.className = 'msg-material';
+      const pre = document.createElement('pre');
+      pre.textContent = content;
+      box.appendChild(pre);
+      div.appendChild(box);
+    } else {
+      const box = document.createElement('div');
+      box.className = 'msg-text';
+      box.textContent = content;
+      div.appendChild(box);
+    }
+    messagesBox.appendChild(div);
+    scrollBottom();
+  }
+
+  document.getElementById('chat-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const input = document.getElementById('chat-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+    const btn = this.querySelector('button');
+    btn.disabled = true;
+    appendMsg('user', 'text', msg);
+    input.value = '';
+    try {
+      const data = await post('/api/conversations/' + convId + '/messages', {message: msg});
+      appendMsg('assistant', 'text', data.reply);
+    } catch (ex) {
+      showError('发送失败：' + ex.message);
+    } finally {
+      btn.disabled = false;
+      input.focus();
+    }
+  });
+
+  async function confirmKind(kind, label) {
+    const btn = document.getElementById('confirm-' + kind);
+    btn.disabled = true;
+    try {
+      const data = await post('/api/conversations/' + convId + '/confirm', {kind: kind});
+      let extra = '';
+      if (data.degraded) extra = '（AI 整理暂不可用，已原文保存，稍后自动补整理）';
+      if (data.note.status === 'duplicate') extra += '（标为疑似重复，可在列表查看）';
+      btn.textContent = '已保存 #' + data.note.id + extra;
+      setTimeout(() => { location.href = '/notes'; }, 1200);
+    } catch (ex) {
+      btn.disabled = false;
+      showError(label + '失败：' + ex.message);
+    }
+  }
+  document.getElementById('confirm-note').addEventListener('click', () => confirmKind('note', '记下来'));
+  document.getElementById('confirm-interest').addEventListener('click', () => confirmKind('interest', '记到兴趣清单'));
+
+  document.getElementById('discard').addEventListener('click', async function () {
+    if (!confirm('放弃这段草稿？内容将删除。')) return;
+    const resp = await fetch('/api/conversations/' + convId, {method: 'DELETE'});
+    if (resp.ok) location.href = '/';
+    else showError('放弃失败');
+  });
+</script>
+{% endblock %}
