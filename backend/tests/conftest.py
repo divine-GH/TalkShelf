@@ -43,7 +43,15 @@ def db_path(monkeypatch):
     path = d / "test.db"
     monkeypatch.setattr(config, "DATABASE_PATH", path)
     yield path
-    shutil.rmtree(d, ignore_errors=True)
+    # 队列 worker 的 to_thread 线程可能仍持有连接（文件占用导致删除失败），
+    # 短重试 + 失败可见——绝不 ignore_errors 静默吞掉（曾因此残留 26 个目录）
+    for _ in range(10):
+        try:
+            shutil.rmtree(d)
+            return
+        except OSError:
+            time.sleep(0.1)
+    raise RuntimeError(f"测试临时目录清理失败（可能文件被占用）: {d}")
 
 
 @pytest.fixture
