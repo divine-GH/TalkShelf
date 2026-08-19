@@ -1,0 +1,10 @@
+# note-brain 直接依赖清单（单机项目，无需锁文件；开工准备清单 §3.2）
+fastapi
+uvicorn
+httpx
+numpy
+trafilatura
+jinja2
+python-dotenv
+pytest
+argon2-cffi

@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 环境与密钥（key 不进 git，设计文档 §9）
+.env
+
+# 数据库与本地数据
+*.db
+*.db-wal
+*.db-shm
+.ollama/
