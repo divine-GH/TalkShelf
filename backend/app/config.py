@@ -1,0 +1,83 @@
+"""note-brain 配置层。
+
+设计文档 §3.4「配置层清单」：把散落在各章节的配置项收集到一处。
+所有配置项均可被同名环境变量覆盖（.env 由 python-dotenv 加载）。
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# 项目根（backend/ 的上一级）
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# 加载 .env（key 只存在家 PC，不入库不进 git，设计文档 §9）
+load_dotenv(BASE_DIR / ".env")
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    try:
+        return int(raw) if raw else default
+    except ValueError:
+        return default
+
+
+# ---------------------------------------------------------------------------
+# 数据库（设计文档 §4；拍板：note-brain/data/note-brain.db，不入库）
+# ---------------------------------------------------------------------------
+DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
+DATABASE_PATH = Path(os.getenv("DATABASE_PATH", str(DATA_DIR / "note-brain.db")))
+
+# ---------------------------------------------------------------------------
+# DeepSeek（设计文档 §6；chat-completions 基址）
+# ---------------------------------------------------------------------------
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")  # §6.1 预设
+LLM_TIMEOUT = _env_int("LLM_TIMEOUT", 60)            # 秒；对话/整理调用
+LLM_MAX_RETRIES = 1                                  # §6.3：校验失败自动重试 1 次
+
+# ---------------------------------------------------------------------------
+# 分类体系（设计文档 §6.2；可配，8 类）
+# ---------------------------------------------------------------------------
+CATEGORIES: dict[str, str] = {
+    "技术": "编程、工具、系统、网络相关",
+    "工作": "职业、项目、会议、同事相关",
+    "学习": "课程、读书、技能提升相关",
+    "生活": "日常琐事、购物、家居、出行相关",
+    "健康": "身体、锻炼、饮食、就医相关",
+    "财务": "收支、理财、报销相关",
+    "灵感": "值得记下来的点子、想法",
+    "其他": "不属于以上分类的内容",
+}
+
+# ---------------------------------------------------------------------------
+# 记录对话与整理（设计文档 §4.3 / §6.4）
+# ---------------------------------------------------------------------------
+# 链接正文抓取（§6.6）：进 LLM 前与落库共用同一份截断文本
+FETCH_TEXT_LIMIT = _env_int("FETCH_TEXT_LIMIT", 20_000)      # 20KB
+FETCH_TIMEOUT = _env_int("FETCH_TIMEOUT", 10)                # 秒
+FETCH_MAX_BODY = _env_int("FETCH_MAX_BODY", 2 * 1024 * 1024)  # 2MB
+
+# 材料（search_result 摘要 / fetched_page 正文）防御性上限，默认同 fetch_text_limit
+MATERIAL_TEXT_LIMIT = _env_int("MATERIAL_TEXT_LIMIT", FETCH_TEXT_LIMIT)
+
+# ---------------------------------------------------------------------------
+# 查重（设计文档 §6.2；M1 为 FTS 近似召回版，M2 升级向量版）
+# ---------------------------------------------------------------------------
+DEDUP_FTS_TOP_K = _env_int("DEDUP_FTS_TOP_K", 3)   # FTS 召回候选数
+DEDUP_QUERY_MAX_TERMS = _env_int("DEDUP_QUERY_MAX_TERMS", 8)  # 从新笔记提取的查询词上限
+
+# ---------------------------------------------------------------------------
+# 异步补做队列（设计文档 §5 / §14 第 5 条）
+# ---------------------------------------------------------------------------
+# 补处理失败指数退避（秒）：1m/5m/15m/1h/6h，最多 5 次；仍失败标 failed
+BACKOFF_SCHEDULE = [60, 300, 900, 3600, 21600]
+
+# ---------------------------------------------------------------------------
+# Web（设计文档 §8）
+# ---------------------------------------------------------------------------
+NOTES_PAGE_SIZE = _env_int("NOTES_PAGE_SIZE", 20)
