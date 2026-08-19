@@ -78,5 +78,5 @@ data/               运行数据（不入库）
 
 ## 已知遗留（不影响使用）
 
-- `backend/_probe700/`、`backend/.pytest-tmp/`、`backend/pytest-cache-files-*/` 是 Windows
-  `os.mkdir(0o700)` 产生的 ACL 损坏目录（沙箱内无法删除），已 gitignore；用管理员资源管理器手动删。
+- 早期 `os.mkdir(0o700)` 产生的 ACL 损坏目录（`backend/_probe700/`、`.pytest-tmp/`、`pytest-cache-files-*/` 等）已清理；
+  相关路径仍保留在 `.gitignore` 防御。若再出现这类「创建者自己都进不去」的目录，用管理员手动删。
