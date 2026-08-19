@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}回顾 — note-brain{% endblock %}
+
+{% block content %}
+<h1>兴趣回顾</h1>
+<p class="hint">每周看一眼兴趣清单：没做的决定去留；做过的给个了结（稍后 / 转收藏 / 删除）。</p>
+
+<section class="section">
+  <h2>未决策</h2>
+  {% if pending %}
+  <ul class="note-list">
+    {% for n in pending %}
+    <li class="note-item" data-id="{{ n.id }}">
+      <div class="note-head">
+        <span class="badge kind-interest">兴趣</span>
+        {% if n.category %}<span class="badge">{{ n.category }}</span>{% endif %}
+        <span class="note-meta">{{ n.created_at }}</span>
+      </div>
+      <div class="note-title">{{ n.title or n.raw[:40] }}</div>
+      {% if n.summary %}<div class="note-summary">{{ n.summary }}</div>{% endif %}
+      {% if n.tags %}<div class="note-tags">{% for t in n.tags %}<span class="tag">#{{ t }}</span>{% endfor %}</div>{% endif %}
+      <div class="review-actions">
+        <button class="btn btn-primary act-done" data-id="{{ n.id }}">去做</button>
+        <span class="btn btn-plain">留着</span>
+        <button class="btn btn-danger act-delete" data-id="{{ n.id }}">放弃</button>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">没有待决策的兴趣条目。</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h2>进行中</h2>
+  {% if in_progress %}
+  <ul class="note-list">
+    {% for n in in_progress %}
+    <li class="note-item" data-id="{{ n.id }}">
+      <div class="note-head">
+        <span class="badge kind-interest">兴趣</span>
+        {% if n.category %}<span class="badge">{{ n.category }}</span>{% endif %}
+        <span class="note-meta">开始于 {{ n.done_at }}</span>
+      </div>
+      <div class="note-title">{{ n.title or n.raw[:40] }}</div>
+      {% if n.summary %}<div class="note-summary">{{ n.summary }}</div>{% endif %}
+      {% if n.tags %}<div class="note-tags">{% for t in n.tags %}<span class="tag">#{{ t }}</span>{% endfor %}</div>{% endif %}
+      <div class="review-actions">
+        <button class="btn act-snooze" data-id="{{ n.id }}">稍后</button>
+        <button class="btn btn-primary act-convert" data-id="{{ n.id }}">转收藏</button>
+        <button class="btn btn-danger act-delete" data-id="{{ n.id }}">删除</button>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">没有进行中的条目。</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block script %}
+<script>
+  async function act(url, method) {
+    const resp = await fetch(url, {method: method});
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      alert('操作失败：' + (data.detail || ('HTTP ' + resp.status)));
+    }
+    return resp.ok;
+  }
+
+  document.querySelectorAll('.act-done').forEach(function (b) {
+    b.addEventListener('click', async function () {
+      if (await act('/api/notes/' + b.dataset.id + '/done', 'POST')) location.reload();
+    });
+  });
+  document.querySelectorAll('.act-snooze').forEach(function (b) {
+    b.addEventListener('click', async function () {
+      if (await act('/api/notes/' + b.dataset.id + '/snooze', 'POST')) location.reload();
+    });
+  });
+  document.querySelectorAll('.act-convert').forEach(function (b) {
+    b.addEventListener('click', async function () {
+      if (!confirm('转为收藏？条目将从回顾清单移入笔记库。')) return;
+      if (await act('/api/notes/' + b.dataset.id + '/convert', 'POST')) location.reload();
+    });
+  });
+  document.querySelectorAll('.act-delete').forEach(function (b) {
+    b.addEventListener('click', async function () {
+      if (!confirm('删除这条？不可恢复。')) return;
+      if (await act('/api/notes/' + b.dataset.id, 'DELETE')) location.reload();
+    });
+  });
+</script>
+{% endblock %}

@@ -374,6 +374,86 @@ def list_notes(
 
 
 # ---------------------------------------------------------------------------
+# 回顾端点（设计文档 §4.2 / M2 决策：kind='interest' 按 done_at 分区）
+#   未决策（done_at IS NULL）：去做 → 置 done_at；留着 → 无操作；放弃 → DELETE
+#   进行中（done_at 非空）：稍后 → 清 done_at 回未决策；转收藏 → kind 改 note（done_at 保留作历史）
+# ---------------------------------------------------------------------------
+
+def _fetch_note_or_404(conn: sqlite3.Connection, note_id: int) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+    return row
+
+
+def _interest_or_409(row: sqlite3.Row) -> None:
+    if row["kind"] != "interest":
+        raise HTTPException(status_code=409, detail="仅兴趣清单条目可执行此操作")
+
+
+@router.get("/api/review")
+def review_list(conn: ConnDep) -> dict:
+    """每周回顾：兴趣清单两分区（§4.2 / M2 决策记录）。"""
+    rows = conn.execute(
+        "SELECT * FROM notes WHERE kind='interest' AND status != 'merged' ORDER BY created_at DESC"
+    ).fetchall()
+    pending, in_progress = [], []
+    for r in rows:
+        d = dict(r)
+        d["tags"] = [t["tag"] for t in conn.execute(
+            "SELECT tag FROM tags WHERE note_id = ? ORDER BY tag", (r["id"],))]
+        (in_progress if r["done_at"] else pending).append(d)
+    return {"pending": pending, "in_progress": in_progress}
+
+
+@router.post("/api/notes/{note_id}/done")
+def note_done(note_id: int, conn: ConnDep) -> dict:
+    """兴趣条目「去做」：置 done_at=now，进入进行中分区（§4.2）。"""
+    row = _fetch_note_or_404(conn, note_id)
+    _interest_or_409(row)
+    conn.execute(
+        "UPDATE notes SET done_at = datetime('now','localtime') WHERE id = ?", (note_id,)
+    )
+    conn.commit()
+    return {"note_id": note_id, "done_at": db.fetch_note(conn, note_id)["done_at"]}
+
+
+@router.post("/api/notes/{note_id}/snooze")
+def note_snooze(note_id: int, conn: ConnDep) -> dict:
+    """「稍后」：清 done_at，回退到未决策分区（M2 决策：进行中 → 稍后）。"""
+    row = _fetch_note_or_404(conn, note_id)
+    _interest_or_409(row)
+    conn.execute("UPDATE notes SET done_at = NULL WHERE id = ?", (note_id,))
+    conn.commit()
+    return {"note_id": note_id, "done_at": None}
+
+
+@router.post("/api/notes/{note_id}/convert")
+def note_convert(note_id: int, conn: ConnDep) -> dict:
+    """「转收藏」：kind 改 note，done_at 保留作历史（做过的时间，M2 决策）。"""
+    row = _fetch_note_or_404(conn, note_id)
+    _interest_or_409(row)
+    conn.execute("UPDATE notes SET kind = 'note' WHERE id = ?", (note_id,))
+    conn.commit()
+    return {"note_id": note_id, "kind": "note"}
+
+
+@router.delete("/api/notes/{note_id}")
+def delete_note(note_id: int, conn: ConnDep) -> JSONResponse:
+    """删除笔记（回顾页「放弃/删除」；外键级联清理 tags/entities/embeddings/对话/材料）。"""
+    _fetch_note_or_404(conn, note_id)
+    # notes_fts / materials_fts 是虚拟表（无外键），必须手动清理同一事务内（§4 FTS 同步约定）
+    db.fts_delete(conn, note_id)
+    conn.execute(
+        "DELETE FROM materials_fts WHERE rowid IN (SELECT id FROM note_materials WHERE note_id = ?)",
+        (note_id,),
+    )
+    conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    conn.commit()
+    return JSONResponse(status_code=204, content=None)
+
+
+# ---------------------------------------------------------------------------
 # 问答端点（设计文档 §7：单轮无状态；向量+FTS+RRF+材料层兜底 + LLM 作答带引用）
 # ---------------------------------------------------------------------------
 
@@ -423,6 +503,15 @@ def index_page(request: Request, conn: ConnDep) -> HTMLResponse:
 @router.get("/ask", response_class=HTMLResponse)
 def ask_page(request: Request) -> HTMLResponse:
     return TEMPLATES.TemplateResponse(request, "ask.html", {"active": "ask"})
+
+
+@router.get("/review", response_class=HTMLResponse)
+def review_page(request: Request, conn: ConnDep) -> HTMLResponse:
+    data = review_list(conn)
+    return TEMPLATES.TemplateResponse(
+        request, "review.html",
+        {"pending": data["pending"], "in_progress": data["in_progress"], "active": "review"},
+    )
 
 
 @router.get("/conversations/{conv_id}", response_class=HTMLResponse)
