@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}登录 — note-brain{% endblock %}
+
+{% block content %}
+<section class="record-entry">
+  <h1>登录</h1>
+  <p class="hint">输入密码访问你的笔记库。</p>
+  <form id="login-form" class="record-form">
+    <input type="password" id="password" placeholder="密码" autofocus autocomplete="current-password">
+    <button type="submit" class="btn btn-primary btn-lg">登录</button>
+  </form>
+  <p id="login-error" class="error" hidden></p>
+</section>
+{% endblock %}
+
+{% block script %}
+<script>
+  const next = {{ next|tojson }};
+  document.getElementById('login-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const err = document.getElementById('login-error');
+    const btn = this.querySelector('button');
+    const password = document.getElementById('password').value;
+    if (!password) return;
+    err.hidden = true;
+    btn.disabled = true;
+    try {
+      const resp = await fetch('/api/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({password: password}),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+      location.href = (next && next !== '/login') ? next : '/';
+    } catch (ex) {
+      err.textContent = '登录失败：' + ex.message;
+      err.hidden = false;
+      btn.disabled = false;
+    }
+  });
+</script>
+{% endblock %}

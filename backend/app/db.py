@@ -93,6 +93,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS materials_fts USING fts5(
     text,
     tokenize='trigram'
 );
+
+-- 登录会话（设计文档 §9：session 存 SQLite 表——可服务端注销、重启不掉线；不采用签名 cookie）
+CREATE TABLE IF NOT EXISTS sessions (
+    token       TEXT PRIMARY KEY,
+    csrf_token  TEXT NOT NULL,          -- CSRF Token（§9：session 关联，页面注入 + 请求头校验）
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    expires_at  TEXT NOT NULL
+);
+
+-- 登录失败记录（§9：限速锁定落 SQLite——配合锁定生效、重启不失效）
+CREATE TABLE IF NOT EXISTS login_failures (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempted_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
 """
 
 

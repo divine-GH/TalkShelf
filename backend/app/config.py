@@ -115,6 +115,22 @@ MATERIALS_TOP_K = _env_int("MATERIALS_TOP_K", 5)     # 材料层兜底召回条�
 BACKOFF_SCHEDULE = [60, 300, 900, 3600, 21600]
 
 # ---------------------------------------------------------------------------
+# 登录（设计文档 §9 + M3 拍板 §24）：.env 配 AUTH_PASSWORD 即全局启用（页面跳登录、API 401）
+# ---------------------------------------------------------------------------
+AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "")      # 明文密码，启动时 argon2 哈希化；空 = 不启用登录
+AUTH_SESSION_DAYS = _env_int("AUTH_SESSION_DAYS", 30)   # 会话有效期
+AUTH_COOKIE_NAME = "NB_SESSION"
+AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "") == "1"  # 部署 HTTPS 时置 1（本地 http 必须关）
+LOGIN_FAIL_LIMIT = _env_int("LOGIN_FAIL_LIMIT", 5)        # 窗口内失败次数阈值（§9：5 次/分钟锁 15 分钟）
+LOGIN_FAIL_WINDOW = _env_int("LOGIN_FAIL_WINDOW", 60)     # 失败计数窗口（秒）
+LOGIN_LOCK_SECONDS = _env_int("LOGIN_LOCK_SECONDS", 900)  # 锁定持续（秒 = 15 分钟）
+
+
+def auth_enabled() -> bool:
+    """登录是否启用：配置了 AUTH_PASSWORD 即启用（§24 拍板）。"""
+    return bool(AUTH_PASSWORD)
+
+# ---------------------------------------------------------------------------
 # Web（设计文档 §8）
 # ---------------------------------------------------------------------------
 NOTES_PAGE_SIZE = _env_int("NOTES_PAGE_SIZE", 20)

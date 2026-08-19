@@ -11,12 +11,13 @@ import logging
 import re
 import sqlite3
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from . import config, db, fetch, llm, notes, queue as queue_mod, retrieval, web_search
+from . import auth, config, db, fetch, llm, notes, queue as queue_mod, retrieval, web_search
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,61 @@ def get_queue(request: Request) -> queue_mod.ReprocessQueue:
 
 ConnDep = Annotated[sqlite3.Connection, Depends(get_conn)]
 QueueDep = Annotated[queue_mod.ReprocessQueue, Depends(get_queue)]
+
+
+def _current_session(request: Request, conn: sqlite3.Connection) -> dict | None:
+    """取当前请求会话（登录未启用时恒为 None）。"""
+    if not config.auth_enabled():
+        return None
+    return auth.get_session(conn, request.cookies.get(config.AUTH_COOKIE_NAME))
+
+
+def require_auth(request: Request, conn: ConnDep) -> dict | None:
+    """API 鉴权依赖（§24：配了密码就全局启用）：未登录 401；非安全方法校验 CSRF Token。
+
+    登录未启用（AUTH_PASSWORD 未配置）时放行——本地开发/测试零负担。
+    """
+    if not config.auth_enabled():
+        request.state.csrf_token = None
+        return None
+    session = _current_session(request, conn)
+    if not session:
+        raise HTTPException(status_code=401, detail="未登录")
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        header = request.headers.get("x-csrf-token", "")
+        if header != session["csrf_token"]:
+            raise HTTPException(status_code=403, detail="CSRF 校验失败")
+    request.state.csrf_token = session["csrf_token"]
+    return session
+
+
+def require_page(request: Request, conn: ConnDep) -> dict | None:
+    """页面路由鉴权依赖：未登录重定向登录页（带 next 回跳）；登录态注入 csrf_token。
+
+    依赖里不能 raise RedirectResponse（非异常），用 303 + Location 头实现跳转。
+    """
+    if not config.auth_enabled():
+        request.state.csrf_token = None
+        return None
+    session = _current_session(request, conn)
+    if not session:
+        raise HTTPException(
+            status_code=303,
+            headers={"Location": f"/login?next={quote(request.url.path)}"},
+        )
+    request.state.csrf_token = session["csrf_token"]
+    return session
+
+
+ApiAuthDep = Annotated[dict | None, Depends(require_auth)]
+PageAuthDep = Annotated[dict | None, Depends(require_page)]
+
+
+def render(request: Request, name: str, ctx: dict) -> HTMLResponse:
+    """统一页面渲染：注入模板公共变量（登录启用状态；csrf_token 由鉴权依赖写入 request.state）。"""
+    ctx = dict(ctx)
+    ctx["auth_enabled"] = config.auth_enabled()
+    return TEMPLATES.TemplateResponse(request, name, ctx)
 
 
 def _fetch_conversation(conn: sqlite3.Connection, conv_id: int) -> sqlite3.Row:
@@ -191,7 +247,7 @@ def _confirm(conn: sqlite3.Connection, conv_id: int, kind: str, rq: queue_mod.Re
 # ---------------------------------------------------------------------------
 
 @router.post("/api/conversations")
-def create_conversation(body: dict, conn: ConnDep, rq: QueueDep) -> dict:
+def create_conversation(body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(status_code=422, detail="message 不能为空")
@@ -206,7 +262,7 @@ def create_conversation(body: dict, conn: ConnDep, rq: QueueDep) -> dict:
 
 
 @router.post("/api/conversations/{conv_id}/messages")
-def add_message(conv_id: int, body: dict, conn: ConnDep) -> dict:
+def add_message(conv_id: int, body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(status_code=422, detail="message 不能为空")
@@ -214,7 +270,7 @@ def add_message(conv_id: int, body: dict, conn: ConnDep) -> dict:
 
 
 @router.post("/api/conversations/{conv_id}/confirm")
-def confirm_conversation(conv_id: int, body: dict, conn: ConnDep, rq: QueueDep) -> dict:
+def confirm_conversation(conv_id: int, body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
     kind = body.get("kind")
     if kind not in ("note", "interest"):
         raise HTTPException(status_code=422, detail="kind 须为 note 或 interest")
@@ -222,7 +278,7 @@ def confirm_conversation(conv_id: int, body: dict, conn: ConnDep, rq: QueueDep) 
 
 
 @router.delete("/api/conversations/{conv_id}")
-def discard_conversation(conv_id: int, conn: ConnDep) -> JSONResponse:
+def discard_conversation(conv_id: int, conn: ConnDep, _auth: ApiAuthDep) -> JSONResponse:
     conv = _fetch_conversation(conn, conv_id)
     if conv["status"] != "draft":
         raise HTTPException(status_code=409, detail="仅草稿可放弃")
@@ -232,7 +288,7 @@ def discard_conversation(conv_id: int, conn: ConnDep) -> JSONResponse:
 
 
 @router.get("/api/conversations")
-def list_conversations(conn: ConnDep) -> dict:
+def list_conversations(conn: ConnDep, _auth: ApiAuthDep) -> dict:
     rows = conn.execute(
         """SELECT c.id, c.status, c.context_note_id, c.created_at, c.updated_at,
                   (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
@@ -251,7 +307,7 @@ def list_conversations(conn: ConnDep) -> dict:
 
 
 @router.get("/api/conversations/{conv_id}")
-def get_conversation(conv_id: int, conn: ConnDep) -> dict:
+def get_conversation(conv_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     conv = _fetch_conversation(conn, conv_id)
     msgs = [
         {
@@ -272,7 +328,7 @@ def get_conversation(conv_id: int, conn: ConnDep) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.post("/api/notes", status_code=202)
-def create_note(body: dict, conn: ConnDep, rq: QueueDep) -> dict:
+def create_note(body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
     raw = (body.get("raw") or "").strip()
     kind = body.get("kind", "note")
     if not raw:
@@ -369,6 +425,7 @@ def list_notes(
     importance: int | None = None,
     q: str | None = None,
     page: int = 1,
+    _auth: ApiAuthDep = None,
 ) -> dict:
     return query_notes(conn, category=category, kind=kind, importance=importance, q=q, page=page)
 
@@ -392,7 +449,7 @@ def _interest_or_409(row: sqlite3.Row) -> None:
 
 
 @router.get("/api/review")
-def review_list(conn: ConnDep) -> dict:
+def review_list(conn: ConnDep, _auth: ApiAuthDep) -> dict:
     """每周回顾：兴趣清单两分区（§4.2 / M2 决策记录）。"""
     rows = conn.execute(
         "SELECT * FROM notes WHERE kind='interest' AND status != 'merged' ORDER BY created_at DESC"
@@ -407,7 +464,7 @@ def review_list(conn: ConnDep) -> dict:
 
 
 @router.post("/api/notes/{note_id}/done")
-def note_done(note_id: int, conn: ConnDep) -> dict:
+def note_done(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     """兴趣条目「去做」：置 done_at=now，进入进行中分区（§4.2）。"""
     row = _fetch_note_or_404(conn, note_id)
     _interest_or_409(row)
@@ -419,7 +476,7 @@ def note_done(note_id: int, conn: ConnDep) -> dict:
 
 
 @router.post("/api/notes/{note_id}/snooze")
-def note_snooze(note_id: int, conn: ConnDep) -> dict:
+def note_snooze(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     """「稍后」：清 done_at，回退到未决策分区（M2 决策：进行中 → 稍后）。"""
     row = _fetch_note_or_404(conn, note_id)
     _interest_or_409(row)
@@ -429,7 +486,7 @@ def note_snooze(note_id: int, conn: ConnDep) -> dict:
 
 
 @router.post("/api/notes/{note_id}/convert")
-def note_convert(note_id: int, conn: ConnDep) -> dict:
+def note_convert(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     """「转收藏」：kind 改 note，done_at 保留作历史（做过的时间，M2 决策）。"""
     row = _fetch_note_or_404(conn, note_id)
     _interest_or_409(row)
@@ -439,7 +496,7 @@ def note_convert(note_id: int, conn: ConnDep) -> dict:
 
 
 @router.delete("/api/notes/{note_id}")
-def delete_note(note_id: int, conn: ConnDep) -> JSONResponse:
+def delete_note(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> JSONResponse:
     """删除笔记（回顾页「放弃/删除」；外键级联清理 tags/entities/embeddings/对话/材料）。"""
     _fetch_note_or_404(conn, note_id)
     # notes_fts / materials_fts 是虚拟表（无外键），必须手动清理同一事务内（§4 FTS 同步约定）
@@ -458,7 +515,7 @@ def delete_note(note_id: int, conn: ConnDep) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 @router.post("/api/ask")
-def ask_question(body: dict, conn: ConnDep) -> dict:
+def ask_question(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     question = (body.get("question") or "").strip()
     if not question:
         raise HTTPException(status_code=422, detail="question 不能为空")
@@ -481,11 +538,65 @@ def ask_question(body: dict, conn: ConnDep) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# 登录端点（设计文档 §9 + M3 拍板 §24：AUTH_PASSWORD 配置即全局启用）
+# ---------------------------------------------------------------------------
+
+@router.post("/api/login")
+def login(body: dict, conn: ConnDep, response: Response) -> dict:
+    """登录：argon2 校验密码 → 建 SQLite session → Set-Cookie（HttpOnly + SameSite=Lax）。
+
+    失败限速（§9：5 次/分钟锁 15 分钟，记录落 SQLite 重启不失效）。
+    登录端点本身无 CSRF 需求（不读 cookie，SameSite=Lax 已挡跨站表单）。
+    """
+    if not config.auth_enabled():
+        raise HTTPException(status_code=403, detail="未启用登录（未配置 AUTH_PASSWORD）")
+    if auth.is_login_blocked(conn):
+        raise HTTPException(
+            status_code=429,
+            detail=f"登录失败次数过多，已锁定，请 {auth.lock_remaining_seconds(conn)} 秒后再试",
+        )
+    password = body.get("password") or ""
+    if not auth.verify_password(password):
+        auth.record_failure(conn)
+        conn.commit()
+        raise HTTPException(status_code=401, detail="密码错误")
+    auth.clear_failures(conn)
+    session = auth.create_session(conn)
+    conn.commit()
+    response.set_cookie(
+        config.AUTH_COOKIE_NAME, session["token"],
+        max_age=config.AUTH_SESSION_DAYS * 86400,
+        httponly=True, samesite="lax", secure=config.AUTH_COOKIE_SECURE, path="/",
+    )
+    return {"ok": True}
+
+
+@router.post("/api/logout")
+def logout(request: Request, conn: ConnDep, response: Response, _auth: ApiAuthDep) -> dict:
+    """登出：删 SQLite session + 清 cookie（走鉴权 → 自动带 CSRF 校验）。"""
+    auth.delete_session(conn, request.cookies.get(config.AUTH_COOKIE_NAME))
+    conn.commit()
+    response.delete_cookie(config.AUTH_COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+@router.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, conn: ConnDep) -> HTMLResponse:
+    """登录页：已登录直接回首页。"""
+    if config.auth_enabled() and _current_session(request, conn):
+        return RedirectResponse("/", status_code=303)
+    return render(
+        request, "login.html",
+        {"active": None, "next": request.query_params.get("next", "/")},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Web 页面（§8：服务端渲染 + 少量原生 JS，移动端优先，中文）
 # ---------------------------------------------------------------------------
 
 @router.get("/", response_class=HTMLResponse)
-def index_page(request: Request, conn: ConnDep) -> HTMLResponse:
+def index_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLResponse:
     recent = query_notes(conn, page=1)["items"][:10]
     drafts = conn.execute(
         """SELECT c.id, c.updated_at,
@@ -493,7 +604,7 @@ def index_page(request: Request, conn: ConnDep) -> HTMLResponse:
                     AND m.role='user' AND m.kind='text' ORDER BY m.id DESC LIMIT 1) AS preview
            FROM conversations c WHERE c.status='draft' ORDER BY c.updated_at DESC"""
     ).fetchall()
-    return TEMPLATES.TemplateResponse(
+    return render(
         request, "index.html",
         {"recent": recent, "drafts": [dict(d) for d in drafts], "categories": config.CATEGORIES,
          "active": "index"},
@@ -501,24 +612,24 @@ def index_page(request: Request, conn: ConnDep) -> HTMLResponse:
 
 
 @router.get("/ask", response_class=HTMLResponse)
-def ask_page(request: Request) -> HTMLResponse:
-    return TEMPLATES.TemplateResponse(request, "ask.html", {"active": "ask"})
+def ask_page(request: Request, _sess: PageAuthDep) -> HTMLResponse:
+    return render(request, "ask.html", {"active": "ask"})
 
 
 @router.get("/review", response_class=HTMLResponse)
-def review_page(request: Request, conn: ConnDep) -> HTMLResponse:
-    data = review_list(conn)
-    return TEMPLATES.TemplateResponse(
+def review_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLResponse:
+    data = review_list(conn, _auth=None)  # 页面路由已鉴权，内部调用无需再查
+    return render(
         request, "review.html",
         {"pending": data["pending"], "in_progress": data["in_progress"], "active": "review"},
     )
 
 
 @router.get("/conversations/{conv_id}", response_class=HTMLResponse)
-def chat_page(request: Request, conv_id: int, conn: ConnDep) -> HTMLResponse:
+def chat_page(request: Request, conv_id: int, conn: ConnDep, _sess: PageAuthDep) -> HTMLResponse:
     conv = _fetch_conversation(conn, conv_id)
     msgs = _conv_messages(conn, conv_id)
-    return TEMPLATES.TemplateResponse(
+    return render(
         request, "chat.html",
         {"conv": dict(conv), "messages": [dict(m) for m in msgs], "active": "index"},
     )
@@ -526,11 +637,11 @@ def chat_page(request: Request, conv_id: int, conn: ConnDep) -> HTMLResponse:
 
 @router.get("/notes", response_class=HTMLResponse)
 def notes_page(
-    request: Request, conn: ConnDep,
+    request: Request, conn: ConnDep, _sess: PageAuthDep,
     category: str | None = None, kind: str | None = None, q: str | None = None, page: int = 1,
 ) -> HTMLResponse:
     data = query_notes(conn, category=category, kind=kind, q=q, page=page)
-    return TEMPLATES.TemplateResponse(
+    return render(
         request, "notes.html",
         {"data": data, "categories": config.CATEGORIES,
          "cur_category": category, "cur_kind": kind, "cur_q": q or "",

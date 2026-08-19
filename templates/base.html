@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ request.state.csrf_token or '' }}">
   <title>{% block title %}note-brain{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -14,6 +15,8 @@
       <a href="/notes" {% if active == 'notes' %}class="on"{% endif %}>笔记</a>
       <a href="/ask" {% if active == 'ask' %}class="on"{% endif %}>问答</a>
       <a href="/review" {% if active == 'review' %}class="on"{% endif %}>回顾</a>
+      <a href="/stats" {% if active == 'stats' %}class="on"{% endif %}>统计</a>
+      {% if auth_enabled %}<a href="#" id="logout-link" class="nav-logout">退出</a>{% endif %}
     </nav>
   </header>
   <main class="container">
