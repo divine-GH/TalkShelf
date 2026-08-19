@@ -66,10 +66,29 @@ FETCH_MAX_BODY = _env_int("FETCH_MAX_BODY", 2 * 1024 * 1024)  # 2MB
 MATERIAL_TEXT_LIMIT = _env_int("MATERIAL_TEXT_LIMIT", FETCH_TEXT_LIMIT)
 
 # ---------------------------------------------------------------------------
-# 查重（设计文档 §6.2；M1 为 FTS 近似召回版，M2 升级向量版）
+# Ollama embedding（设计文档 §6.1 / §14 第 7、8 条；M2 接入）
 # ---------------------------------------------------------------------------
-DEDUP_FTS_TOP_K = _env_int("DEDUP_FTS_TOP_K", 3)   # FTS 召回候选数
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")  # §10：只绑回环
+EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3")                # 1024 维
+EMBED_TIMEOUT = _env_int("EMBED_TIMEOUT", 30)                   # 秒
+EMBED_TEXT_LIMIT = _env_int("EMBED_TEXT_LIMIT", 6000)           # 单条笔记向量化文本上限（字符）
+
+# ---------------------------------------------------------------------------
+# 查重（设计文档 §6.2；M1 FTS 近似版，M2 升级向量版，Ollama 不可用退 FTS）
+# ---------------------------------------------------------------------------
+DEDUP_VECTOR_TOP_K = _env_int("DEDUP_VECTOR_TOP_K", 3)  # 向量召回候选数
+DEDUP_FTS_TOP_K = _env_int("DEDUP_FTS_TOP_K", 3)        # FTS 召回候选数（降级路径）
 DEDUP_QUERY_MAX_TERMS = _env_int("DEDUP_QUERY_MAX_TERMS", 8)  # 从新笔记提取的查询词上限
+
+# ---------------------------------------------------------------------------
+# 检索与问答（设计文档 §7）
+# ---------------------------------------------------------------------------
+VECTOR_TOP_K = _env_int("VECTOR_TOP_K", 8)          # 向量召回 Top-K
+FTS_TOP_K = _env_int("FTS_TOP_K", 5)                # FTS 关键词召回 Top-K
+RRF_K = _env_int("RRF_K", 60)                        # RRF 融合常数（§7：score=Σ1/(k+rank)）
+ASK_TOP_N = _env_int("ASK_TOP_N", 6)                 # RRF 融合后取 Top-N 进 prompt
+VECTOR_MIN_SIM = float(os.getenv("VECTOR_MIN_SIM", "0.4"))  # Top-1 向量相似度阈值（§7：低于则视为召回不足）
+MATERIALS_TOP_K = _env_int("MATERIALS_TOP_K", 5)     # 材料层兜底召回条数
 
 # ---------------------------------------------------------------------------
 # 异步补做队列（设计文档 §5 / §14 第 5 条）

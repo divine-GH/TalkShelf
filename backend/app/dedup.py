@@ -1,7 +1,7 @@
-"""查重（设计文档 §6.2）：M1 为 FTS 近似召回版（§12 / §21.1 #3），M2 接入 Ollama 后升级向量版。
+"""查重（设计文档 §6.2）：M2 升级为向量召回版（§12 / §21.1 #3），Ollama 不可用退 FTS 近似版。
 
-流程：从新笔记提取查询词（英文/数字 token ≥3 字符 + 中文连续串 ≥3 字，trigram 前提）→
-notes_fts 召回 Top-K（排除自身与 merged）→ LLM 判断 duplicate_of。
+流程：向量召回 Top-3（新笔记 embedding 由队列管线先算好，§14 第 6 条顺序）
+→ LLM 判断 duplicate_of；Ollama 挂/库内无向量时退化为 FTS 关键词召回 Top-3。
 命中时笔记仍入库但标 status='duplicate'（绝不丢输入）；查重失败由调用方只记日志、不反噬（§21.2 #5）。
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ import logging
 import re
 import sqlite3
 
-from . import config, db, llm
+from . import config, db, embedding, llm
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +64,16 @@ def fts_candidates(conn: sqlite3.Connection, note: dict) -> list[dict]:
 
 
 def check_duplicate(conn: sqlite3.Connection, note: dict) -> int | None:
-    """M1 查重：返回重复的旧笔记 id 或 None。LLM 失败抛 LLMError（调用方记日志不反噬）。"""
-    candidates = fts_candidates(conn, note)
+    """查重：返回重复的旧笔记 id 或 None。LLM 失败抛 LLMError（调用方记日志不反噬）。
+
+    向量版优先（§6.2）；Ollama 不可用/库内无向量时退化为 FTS 近似版（§14 第 8 条），不报错。
+    """
+    candidates: list[dict] = []
+    try:
+        candidates = embedding.vector_candidates(conn, note, config.DEDUP_VECTOR_TOP_K)
+    except embedding.EmbeddingError as e:
+        logger.info("向量查重不可用（%s），退化为 FTS 近似版", e)
+        candidates = fts_candidates(conn, note)
     if not candidates:
         return None
     summary = note.get("summary") or note.get("title") or note.get("raw", "")[:200]

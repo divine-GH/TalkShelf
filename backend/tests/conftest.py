@@ -1,11 +1,14 @@
-"""pytest 共享夹具（设计文档 §12 测试约定：LLM 全部 mock）。
+"""pytest 共享夹具（设计文档 §12 测试约定：LLM 与 embedding 全部 mock）。
 
 - 每个测试独立临时 SQLite（monkeypatch config.DATABASE_PATH，db.connect 动态读取）；
 - LLM 层（llm._call_chat / llm.chat_json）默认 mock 为固定整理 JSON，不触网；
+- embedding 层（embedding.embed_texts）默认 mock 为确定性伪向量（相同文本 → 相同向量），
+  不触 Ollama；真实语义评测走 scripts/eval_retrieval.py（本机 Ollama）。
 - 测试通过 TestClient 走完整 HTTP 层 + lifespan（含异步补做队列）。
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -13,10 +16,11 @@ import tempfile
 import time
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, db, llm
+from app import config, db, embedding, llm
 
 # 固定整理 JSON（§6.2 示例形态；LLM mock 的统一输出）
 ORGANIZED = {
@@ -67,6 +71,25 @@ def conn(db_path):
     conn = db.connect()
     yield conn
     conn.close()
+
+
+def pseudo(text: str) -> list[float]:
+    """确定性伪向量：相同文本 → 相同向量（64 维、归一化）。conftest 与测试恢复 mock 共用。"""
+    seed = int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:8], "little")
+    v = np.random.default_rng(seed).normal(size=64).astype("<f4")
+    v /= np.linalg.norm(v) + 1e-9
+    return v.tolist()
+
+
+@pytest.fixture(autouse=True)
+def emb_ok(monkeypatch):
+    """embedding mock（autouse）：确定性伪向量，不触 Ollama。
+
+    相同文本 → 相同向量，可测向量召回/查重的结构正确性；
+    真实语义评测不在 pytest 内（scripts/eval_retrieval.py，本机 Ollama）。
+    """
+    monkeypatch.setattr(embedding, "embed_texts",
+                        lambda texts: [pseudo(t) for t in texts])
 
 
 @pytest.fixture
