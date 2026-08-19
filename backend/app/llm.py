@@ -73,6 +73,43 @@ def _call_chat(
         raise LLMError(f"DeepSeek 调用失败: {e}") from e
 
 
+def _chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    *,
+    timeout: float = config.LLM_TIMEOUT,
+) -> tuple[str, list[dict]]:
+    """带工具声明的对话调用（web_fetch 工具循环用，§22.3）。
+
+    返回 (文本, tool_calls 列表)；tool_calls 为空表示本轮无工具调用。
+    独立于 _call_chat：无工具路径仍走 _call_chat，不破坏现有调用方与测试 mock。
+    """
+    if not config.DEEPSEEK_API_KEY:
+        raise LLMError("DEEPSEEK_API_KEY 未配置")
+    body: dict[str, Any] = {
+        "model": config.LLM_MODEL,
+        "messages": messages,
+        "temperature": 0,
+        "stream": False,
+        "tools": tools,
+    }
+    url = f"{config.DEEPSEEK_BASE_URL}/chat/completions"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(
+                url,
+                headers={"Authorization": f"Bearer {config.DEEPSEEK_API_KEY}"},
+                json=body,
+            )
+        if resp.status_code != 200:
+            raise LLMError(f"DeepSeek HTTP {resp.status_code}: {resp.text[:300]}")
+        data = resp.json()
+        msg = data["choices"][0]["message"]
+        return (msg.get("content") or ""), (msg.get("tool_calls") or [])
+    except httpx.HTTPError as e:
+        raise LLMError(f"DeepSeek 调用失败: {e}") from e
+
+
 def parse_json(text: str) -> dict:
     """剥离围栏 + json.loads；失败抛 LLMError。"""
     cleaned = _strip_code_fence(text)
@@ -190,18 +227,37 @@ def material_message(kind: str, url: str | None, text: str) -> dict:
     return {"role": "user", "content": head + text}
 
 
+# 模型侧 web_fetch 工具 schema（§22.3：仅 url 一个参数；超时/上限走 config）
+WEB_FETCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "web_fetch",
+        "description": "抓取一个网页的正文（HTML 转 markdown，自动截断）。用于跟进搜索结果或用户提到的链接全文。",
+        "parameters": {
+            "type": "object",
+            "properties": {"url": {"type": "string", "description": "要抓取的 http(s) URL"}},
+            "required": ["url"],
+        },
+    },
+}
+
+
 def organize_conversation(
     history: list[dict],
     *,
     context_note: dict | None = None,
     force_json: bool = False,
+    tools: list[dict] | None = None,
 ) -> dict:
     """一次对话整理调用。
 
     history: [{"role": "user"|"assistant", "content": str, "kind": "text"|"fetched_page"|"search_result"}]
-    返回: {"text": str, "organized": dict|None}
+    返回: {"text": str, "organized": dict|None, "tool_materials": [...]}
       - 信息足够且输出为合法整理 JSON → organized 非空（force_json 时保证非空）
       - 追问 → organized=None，text 为追问文本
+      - tools 非空时（如搜索结果跟进，§6.6/§22.3）：LLM 可主动调用 web_fetch 抓全文，
+        工具循环最多 WEB_FETCH_TOOL_MAX_ROUNDS 轮；执行的抓取结果进 tool_materials
+        （[{kind, url, content}]，由调用方落库追溯 + 复制进 note_materials）
     """
     sys_prompt = build_system_prompt(context_note)
     if force_json:
@@ -215,17 +271,50 @@ def organize_conversation(
 
     if force_json:
         data = chat_json(messages, validate=validate_organized)
-        return {"text": json.dumps(data, ensure_ascii=False), "organized": data}
-    # 普通回复：不强制 json_object——LLM 可自由追问；若恰好输出合法整理 JSON 则识别为整理结果，
-    # 否则按追问文本返回（§6.4：信息不足时追问，不重试——追问不是校验失败）
+        return {"text": json.dumps(data, ensure_ascii=False), "organized": data, "tool_materials": []}
+
+    tool_materials: list[dict] = []
+    if tools:
+        # 工具循环（§22.3）：执行 LLM 的 web_fetch 调用 → tool 结果回传 → 继续，直到无调用或达上限
+        from . import fetch  # 延迟导入避免循环依赖
+
+        text, calls = _chat_with_tools(messages, tools)
+        for _ in range(config.WEB_FETCH_TOOL_MAX_ROUNDS):
+            if not calls:
+                break
+            for call in calls:
+                fn = call.get("function") or {}
+                tool_content = f"web_fetch 调用失败: 未知工具 {fn.get('name')}"
+                if fn.get("name") == "web_fetch":
+                    try:
+                        args = json.loads(fn.get("arguments") or "{}")
+                        result = fetch.fetch_page(args.get("url") or "")
+                        msg = fetch.fetched_message(result)
+                        tool_content = msg["content"]
+                        tool_materials.append({"kind": "fetched_page", "url": result.url, "content": msg["content"]})
+                    except (json.JSONDecodeError, fetch.FetchError) as e:
+                        tool_content = f"web_fetch 调用失败: {e}"
+                messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": tool_content})
+            text, calls = _chat_with_tools(messages, tools)
+        # 工具循环结束后按普通回复解析（整理 JSON 或追问）
+        try:
+            data = parse_json(text)
+            validate_organized(data)
+            return {"text": text, "organized": data, "tool_materials": tool_materials}
+        except Exception as e:  # noqa: BLE001
+            logger.info("LLM 工具轮次后回复非整理 JSON，按追问文本处理：%s", e)
+            return {"text": text, "organized": None, "tool_materials": tool_materials}
+
+    # 普通回复（无工具）：不强制 json_object——LLM 可自由追问；若恰好输出合法整理 JSON
+    # 则识别为整理结果，否则按追问文本返回（§6.4：信息不足时追问，不重试——追问不是校验失败）
     text = _call_chat(messages)
     try:
         data = parse_json(text)
         validate_organized(data)
-        return {"text": text, "organized": data}
+        return {"text": text, "organized": data, "tool_materials": []}
     except Exception as e:  # noqa: BLE001
         logger.info("LLM 普通回复非整理 JSON，按追问文本处理：%s", e)
-        return {"text": text, "organized": None}
+        return {"text": text, "organized": None, "tool_materials": []}
 
 
 # ---------------------------------------------------------------------------

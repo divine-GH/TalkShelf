@@ -103,8 +103,13 @@ def llm_ok(monkeypatch):
             return {"duplicate_of": None}
         return dict(ORGANIZED)  # 整理路径（organize_conversation force_json）
 
+    def fake_chat_tools(messages, tools, **kwargs):
+        # 工具路径（搜索结果注入轮次）：LLM 默认不调工具，直接输出整理 JSON
+        return json.dumps(ORGANIZED, ensure_ascii=False), []
+
     monkeypatch.setattr(llm, "_call_chat", fake_chat)
     monkeypatch.setattr(llm, "chat_json", fake_chat_json)
+    monkeypatch.setattr(llm, "_chat_with_tools", fake_chat_tools)
     return ORGANIZED
 
 
@@ -116,6 +121,7 @@ def llm_down(monkeypatch):
 
     monkeypatch.setattr(llm, "_call_chat", boom)
     monkeypatch.setattr(llm, "chat_json", boom)
+    monkeypatch.setattr(llm, "_chat_with_tools", boom)
 
 
 def wait_for(predicate, timeout: float = 3.0, desc: str = "条件"):

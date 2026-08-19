@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from . import config, db, fetch, llm, notes, queue as queue_mod, retrieval
+from . import config, db, fetch, llm, notes, queue as queue_mod, retrieval, web_search
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ def extract_urls(message: str) -> list[str]:
 
 
 def _step_conversation(conn: sqlite3.Connection, conv_id: int, message: str) -> dict:
-    """追加一条用户消息 → 抓取链接正文 → LLM 回复 → 落消息。返回给前端的回复对象。"""
+    """追加一条用户消息 → 直抓链接正文 + 原生搜索（按意图词触发）→ LLM 回复（可调 web_fetch）→ 落消息。"""
     conv = _fetch_conversation(conn, conv_id)
     if conv["status"] != "draft":
         raise HTTPException(status_code=409, detail="对话已归档，不可继续")
@@ -91,7 +91,7 @@ def _step_conversation(conn: sqlite3.Connection, conv_id: int, message: str) -> 
         (conv_id, message),
     )
 
-    # 链接正文抓取（M1 服务端直抓过渡，§22.4 #6）：用户消息含 URL 即抓，失败降级不阻塞
+    # 链接正文抓取（服务端直抓保留，§22.4 #6）：用户消息含 URL 即抓，失败降级不阻塞
     fetched_urls: list[str] = []
     for url in extract_urls(message):
         try:
@@ -105,13 +105,29 @@ def _step_conversation(conn: sqlite3.Connection, conv_id: int, message: str) -> 
         except fetch.FetchError as e:
             logger.warning("抓取失败（降级，不阻塞）%s: %s", url, e)
 
+    # 原生联网搜索（§6.5：用户明确要求才搜；失败降级不阻塞，对话照常）
+    searched = False
+    if web_search.should_search(message):
+        try:
+            items = web_search.search(message)
+            content = web_search.results_to_material(items)
+            conn.execute(
+                "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'search_result', ?)",
+                (conv_id, content),
+            )
+            searched = True
+        except web_search.SearchError as e:
+            logger.warning("搜索失败（降级，不阻塞）: %s", e)
+
     conn.execute(
         "UPDATE conversations SET updated_at = datetime('now','localtime') WHERE id = ?", (conv_id,)
     )
 
     context_note = db.fetch_note(conn, conv["context_note_id"]) if conv["context_note_id"] else None
+    # 有搜索结果时声明 web_fetch 工具：LLM 可主动跟进抓全文（§6.6/§22.3）
+    tools = [llm.WEB_FETCH_TOOL] if searched else None
     try:
-        reply = llm.organize_conversation(_history(conn, conv_id), context_note=context_note)
+        reply = llm.organize_conversation(_history(conn, conv_id), context_note=context_note, tools=tools)
     except llm.LLMError as e:
         logger.warning("LLM 不可用，对话降级直存模式: %s", e)
         degraded = "（AI 整理服务暂不可用：对话可继续，或直接拍板原文保存，稍后自动补整理。）"
@@ -120,15 +136,21 @@ def _step_conversation(conn: sqlite3.Connection, conv_id: int, message: str) -> 
             (conv_id, degraded),
         )
         conn.commit()
-        return {"reply": degraded, "degraded": True, "fetched": fetched_urls}
+        return {"reply": degraded, "degraded": True, "fetched": fetched_urls, "searched": searched}
 
+    # 工具循环里执行的抓取落库（追溯 + Tier 2 材料检索；LLM 已见同一份文本）
+    for m in reply.get("tool_materials", []):
+        conn.execute(
+            "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'fetched_page', ?)",
+            (conv_id, m["content"]),
+        )
     conn.execute(
         "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'text', ?)",
         (conv_id, reply["text"]),
     )
     conn.commit()
     return {"reply": reply["text"], "organized": reply["organized"] is not None,
-            "degraded": False, "fetched": fetched_urls}
+            "degraded": False, "fetched": fetched_urls, "searched": searched}
 
 
 def _confirm(conn: sqlite3.Connection, conv_id: int, kind: str, rq: queue_mod.ReprocessQueue) -> dict:

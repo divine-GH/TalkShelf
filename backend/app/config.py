@@ -66,6 +66,24 @@ FETCH_MAX_BODY = _env_int("FETCH_MAX_BODY", 2 * 1024 * 1024)  # 2MB
 MATERIAL_TEXT_LIMIT = _env_int("MATERIAL_TEXT_LIMIT", FETCH_TEXT_LIMIT)
 
 # ---------------------------------------------------------------------------
+# 联网搜索（设计文档 §6.5 / §22：DeepSeek 原生 web_search，Anthropic 兼容端点）
+# ---------------------------------------------------------------------------
+ANTHROPIC_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic/v1")
+SEARCH_MODEL = os.getenv("SEARCH_MODEL", LLM_MODEL)      # §22.4 #1：搜索沿用 deepseek-chat
+SEARCH_MAX_RESULTS = _env_int("SEARCH_MAX_RESULTS", 8)   # 去重截断后保留条数
+SEARCH_MAX_USES = _env_int("SEARCH_MAX_USES", 5)         # §22.4 #3：服务端不完全按声明，靠去重截断兜底
+SEARCH_MAX_TOKENS = _env_int("SEARCH_MAX_TOKENS", 4096)
+SEARCH_TIMEOUT = _env_int("SEARCH_TIMEOUT", 60)          # 搜索=一次完整模型轮次，比普通调用慢
+# 搜索触发意图词（§6.5：用户明确要求才搜；命中即触发一次原生搜索）
+SEARCH_TRIGGER_WORDS = ("查一下", "查一查", "搜一下", "搜一搜", "帮我查", "帮我搜",
+                        "搜索", "查查", "搜搜", "找找", "上网查", "查资料")
+
+# ---------------------------------------------------------------------------
+# 模型侧 web_fetch 工具（设计文档 §6.6 / §22.3：LLM 主动调用抓取，工具循环）
+# ---------------------------------------------------------------------------
+WEB_FETCH_TOOL_MAX_ROUNDS = _env_int("WEB_FETCH_TOOL_MAX_ROUNDS", 3)  # 单轮对话内工具循环上限
+
+# ---------------------------------------------------------------------------
 # Ollama embedding（设计文档 §6.1 / §14 第 7、8 条；M2 接入）
 # ---------------------------------------------------------------------------
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")  # §10：只绑回环

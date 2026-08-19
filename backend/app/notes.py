@@ -11,11 +11,16 @@ import sqlite3
 from . import config, db, llm
 
 _FETCHED_URL_RE = re.compile(r"^Fetched (\S+)")
+_MD_LINK_RE = re.compile(r"\]\((https?://[^)\s]+)\)")
 
-# messages 表无 url 列（设计文档 §4）：fetched_page 的来源 URL 在 content 的 Fetched 头里
+# messages 表无 url 列（设计文档 §4）：fetched_page 的来源 URL 在 content 的 Fetched 头里；
+# search_result 的来源 URL 在 markdown 链接里（- [标题](url)，多条取第一条）
 def _material_url(kind: str, content: str) -> str | None:
     if kind == "fetched_page":
         m = _FETCHED_URL_RE.match(content)
+        return m.group(1) if m else None
+    if kind == "search_result":
+        m = _MD_LINK_RE.search(content)
         return m.group(1) if m else None
     return None
 
