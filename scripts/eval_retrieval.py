@@ -25,6 +25,8 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE / "backend"))
 
+sys.stdout.reconfigure(encoding="utf-8")  # Windows 管道 GBK 乱码/emoji 炸输出防护（同 smoke_e2e）
+
 from app import config, db, embedding, retrieval  # noqa: E402
 
 EVAL_SET_PATH = BASE / "backend" / "app" / "data" / "rag_eval_set.json"

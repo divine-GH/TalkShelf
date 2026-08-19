@@ -100,8 +100,78 @@ def main() -> int:
         check("回顾两分区", "pending" in review and "in_progress" in review)
         check("进行中分区含该条目", any(n["id"] == interest_id for n in review["in_progress"]))
 
+        # 6. M3 详情页：详情 API（含来源对话）+ 页面渲染
+        resp = client.get(f"/api/notes/{note_id}")
+        detail = resp.json()
+        check("详情 API 200", resp.status_code == 200)
+        check("详情含来源对话", len(detail.get("conversations") or []) >= 1)
+        resp = client.get(f"/notes/{note_id}")
+        check("详情页 HTML 200", resp.status_code == 200, resp.text[:60].replace("\n", " "))
+
+        # 7. M3 完整编辑（PUT）：改标题 → 真实 Ollama 重算向量
+        resp = client.put(f"/api/notes/{note_id}", json={"title": "冒烟改过的标题"})
+        check("PUT 编辑 200", resp.status_code == 200, resp.text[:200])
+        deadline = time.time() + 120
+        vec_changed = False
+        while time.time() < deadline:
+            conn = db.connect()
+            try:
+                vec = conn.execute(
+                    "SELECT vector FROM embeddings WHERE note_id = ?", (note_id,)).fetchone()
+            finally:
+                conn.close()
+            if vec is not None:
+                vec_changed = True
+                break
+            time.sleep(1)
+        check("编辑后向量重算（真实 Ollama）", vec_changed)
+        resp = client.get(f"/api/notes/{note_id}")
+        check("编辑生效", resp.json()["note"]["title"] == "冒烟改过的标题")
+
+        # 8. M3 重新整理（reprocess）：清元数据 → 真实 LLM 重整理 → 恢复
+        resp = client.post(f"/api/notes/{note_id}/reprocess")
+        check("reprocess 200", resp.status_code == 200)
+        deadline = time.time() + 120
+        reorg = False
+        while time.time() < deadline:
+            status, title = note_status_db(note_id)
+            if status in ("processed", "duplicate") and title:
+                reorg = True
+                break
+            time.sleep(1)
+        check("重新整理完成（真实 LLM + Ollama）", reorg)
+
+        # 9. M3 统计 + 每周总结（真实 LLM）
+        resp = client.get("/api/stats")
+        st = resp.json()
+        check("stats 200 且含分布", resp.status_code == 200 and "by_category" in st and "by_month" in st)
+        resp = client.post("/api/weekly")
+        wk = resp.json()
+        check("每周总结生成（真实 LLM）", resp.status_code == 200 and wk.get("degraded") is False,
+              f"degraded={wk.get('degraded')} summary={wk.get('summary', '')[:60]!r}")
+
+        # 10. M3 登录：.env 未配 AUTH_PASSWORD 则跳过（配了则走真实登录）
+        if config.auth_enabled():
+            resp = client.get("/notes", follow_redirects=False)
+            check("未登录页面重定向", resp.status_code == 303)
+            resp = client.post("/api/login", json={"password": config.AUTH_PASSWORD})
+            check("登录成功", resp.status_code == 200, resp.text[:200])
+            check("登录后可访问", client.get("/notes").status_code == 200)
+        else:
+            check("登录（.env 未配 AUTH_PASSWORD，跳过）", True)
+
     print(f"\n结果：PASS={PASS} FAIL={FAIL}（临时库：{config.DATABASE_PATH}，保留供排查）")
     return 0 if FAIL == 0 else 1
+
+
+def note_status_db(note_id: int):
+    """读真实库（冒烟用）的笔记状态与标题。"""
+    conn = db.connect()
+    try:
+        row = conn.execute("SELECT status, title FROM notes WHERE id = ?", (note_id,)).fetchone()
+        return (row["status"], row["title"]) if row else (None, None)
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
