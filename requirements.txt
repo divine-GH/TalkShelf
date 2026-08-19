@@ -3,7 +3,7 @@ fastapi
 uvicorn
 httpx
 numpy
-trafilatura
+markdownify
 jinja2
 python-dotenv
 pytest
