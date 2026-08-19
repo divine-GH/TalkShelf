@@ -29,6 +29,10 @@
 
 ## 启动（必须单 worker）
 
+**一键启动**：右键 `start.ps1` → 「使用 PowerShell 运行」（自动拉起 Ollama 并启动服务，Ctrl+C 停止）。
+
+手动方式：
+
 ```powershell
 cd backend
 & 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
