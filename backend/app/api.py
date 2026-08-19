@@ -1,0 +1,393 @@
+"""API 层（设计文档 §5，M1 范围）+ Web 页面路由（§8）。
+
+M1 端点：conversations 六件套、POST /api/notes（快捷直存）、GET /api/notes（列表检索）；
+页面：首页（记录对话入口 + 最近笔记 + 草稿）、聊天页、笔记列表页。
+M2+ 再补：/api/ask、/api/review、/api/notes/{id}（详情/PUT/DELETE）、/api/stats、export/import、登录。
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+import sqlite3
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+
+from . import config, db, fetch, llm, notes, queue as queue_mod
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+# URL 匹配排除中文/全角标点，避免把后续文本吃进 URL（如 "http://x.cn/2，以及…"）
+_URL_RE = re.compile(r"https?://[^\s<>\"'，。；：！？、（）【】《》「」『』]+")
+TEMPLATES = Jinja2Templates(directory=str(config.BASE_DIR / "templates"))
+TEMPLATES.env.autoescape = True  # Starlette 默认不开 autoescape，必须显式开启
+
+
+# ---------------------------------------------------------------------------
+# 依赖
+# ---------------------------------------------------------------------------
+
+def get_conn() -> sqlite3.Connection:
+    conn = db.connect()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def get_queue(request: Request) -> queue_mod.ReprocessQueue:
+    return request.app.state.queue
+
+
+ConnDep = Annotated[sqlite3.Connection, Depends(get_conn)]
+QueueDep = Annotated[queue_mod.ReprocessQueue, Depends(get_queue)]
+
+
+def _fetch_conversation(conn: sqlite3.Connection, conv_id: int) -> sqlite3.Row:
+    conv = conn.execute("SELECT * FROM conversations WHERE id = ?", (conv_id,)).fetchone()
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return conv
+
+
+def _conv_messages(conn: sqlite3.Connection, conv_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM messages WHERE conversation_id = ? ORDER BY id", (conv_id,)
+    ).fetchall()
+
+
+def _history(conn: sqlite3.Connection, conv_id: int) -> list[dict]:
+    return [
+        {"role": m["role"], "kind": m["kind"], "content": m["content"], "url": None}
+        for m in _conv_messages(conn, conv_id)
+    ]
+
+
+def extract_urls(message: str) -> list[str]:
+    """从用户消息提取 http(s) URL（去重）。"""
+    seen: set[str] = set()
+    urls: list[str] = []
+    for m in _URL_RE.findall(message):
+        url = m.rstrip(".,;:!?)]}")
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+def _step_conversation(conn: sqlite3.Connection, conv_id: int, message: str) -> dict:
+    """追加一条用户消息 → 抓取链接正文 → LLM 回复 → 落消息。返回给前端的回复对象。"""
+    conv = _fetch_conversation(conn, conv_id)
+    if conv["status"] != "draft":
+        raise HTTPException(status_code=409, detail="对话已归档，不可继续")
+
+    conn.execute(
+        "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'user', 'text', ?)",
+        (conv_id, message),
+    )
+
+    # 链接正文抓取（M1 服务端直抓过渡，§22.4 #6）：用户消息含 URL 即抓，失败降级不阻塞
+    fetched_urls: list[str] = []
+    for url in extract_urls(message):
+        try:
+            result = fetch.fetch_page(url)
+            msg = fetch.fetched_message(result)
+            conn.execute(
+                "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'fetched_page', ?)",
+                (conv_id, msg["content"]),
+            )
+            fetched_urls.append(url)
+        except fetch.FetchError as e:
+            logger.warning("抓取失败（降级，不阻塞）%s: %s", url, e)
+
+    conn.execute(
+        "UPDATE conversations SET updated_at = datetime('now','localtime') WHERE id = ?", (conv_id,)
+    )
+
+    context_note = db.fetch_note(conn, conv["context_note_id"]) if conv["context_note_id"] else None
+    try:
+        reply = llm.organize_conversation(_history(conn, conv_id), context_note=context_note)
+    except llm.LLMError as e:
+        logger.warning("LLM 不可用，对话降级直存模式: %s", e)
+        degraded = "（AI 整理服务暂不可用：对话可继续，或直接拍板原文保存，稍后自动补整理。）"
+        conn.execute(
+            "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'text', ?)",
+            (conv_id, degraded),
+        )
+        conn.commit()
+        return {"reply": degraded, "degraded": True, "fetched": fetched_urls}
+
+    conn.execute(
+        "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'text', ?)",
+        (conv_id, reply["text"]),
+    )
+    conn.commit()
+    return {"reply": reply["text"], "organized": reply["organized"] is not None,
+            "degraded": False, "fetched": fetched_urls}
+
+
+def _confirm(conn: sqlite3.Connection, conv_id: int, kind: str, rq: queue_mod.ReprocessQueue) -> dict:
+    """拍板落库：优先用对话中已生成的整理 JSON；没有则强制整理一次；失败直存 pending。"""
+    conv = _fetch_conversation(conn, conv_id)
+    if conv["status"] != "draft":
+        raise HTTPException(status_code=409, detail="对话已归档，不可拍板")
+    msgs = _conv_messages(conn, conv_id)
+    organized = notes.latest_organized(msgs)
+    degraded = False
+    if organized is None:
+        context_note = db.fetch_note(conn, conv["context_note_id"]) if conv["context_note_id"] else None
+        try:
+            organized = llm.organize_conversation(
+                _history(conn, conv_id), context_note=context_note, force_json=True
+            )["organized"]
+            conn.execute(
+                "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'text', ?)",
+                (conv_id, json.dumps(organized, ensure_ascii=False)),
+            )
+        except llm.LLMError as e:
+            logger.warning("拍板时整理失败，直存 pending: %s", e)
+            organized = None
+            degraded = True
+    try:
+        note = notes.confirm_conversation(conn, conv_id, kind, organized)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except notes.ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    conn.commit()
+    rq.submit(note["id"])  # 补做管线（FTS 幂等同步 + 查重；pending 另有 LLM 整理）
+    return {"note": note, "degraded": degraded}
+
+
+# ---------------------------------------------------------------------------
+# 对话端点
+# ---------------------------------------------------------------------------
+
+@router.post("/api/conversations")
+def create_conversation(body: dict, conn: ConnDep, rq: QueueDep) -> dict:
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="message 不能为空")
+    context_note_id = body.get("context_note_id")
+    cur = conn.execute(
+        "INSERT INTO conversations(status, context_note_id) VALUES ('draft', ?)",
+        (context_note_id,),
+    )
+    conv_id = cur.lastrowid
+    result = _step_conversation(conn, conv_id, message)
+    return {"conversation_id": conv_id, **result}
+
+
+@router.post("/api/conversations/{conv_id}/messages")
+def add_message(conv_id: int, body: dict, conn: ConnDep) -> dict:
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="message 不能为空")
+    return _step_conversation(conn, conv_id, message)
+
+
+@router.post("/api/conversations/{conv_id}/confirm")
+def confirm_conversation(conv_id: int, body: dict, conn: ConnDep, rq: QueueDep) -> dict:
+    kind = body.get("kind")
+    if kind not in ("note", "interest"):
+        raise HTTPException(status_code=422, detail="kind 须为 note 或 interest")
+    return _confirm(conn, conv_id, kind, rq)
+
+
+@router.delete("/api/conversations/{conv_id}")
+def discard_conversation(conv_id: int, conn: ConnDep) -> JSONResponse:
+    conv = _fetch_conversation(conn, conv_id)
+    if conv["status"] != "draft":
+        raise HTTPException(status_code=409, detail="仅草稿可放弃")
+    conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+    conn.commit()
+    return JSONResponse(status_code=204, content=None)
+
+
+@router.get("/api/conversations")
+def list_conversations(conn: ConnDep) -> dict:
+    rows = conn.execute(
+        """SELECT c.id, c.status, c.context_note_id, c.created_at, c.updated_at,
+                  (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
+                  (SELECT content FROM messages m WHERE m.conversation_id = c.id
+                    AND m.role='user' AND m.kind='text' ORDER BY m.id DESC LIMIT 1) AS last_user_text
+           FROM conversations c
+           WHERE c.status = 'draft'
+           ORDER BY c.updated_at DESC, c.id DESC"""
+    ).fetchall()
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["preview"] = (d.pop("last_user_text") or "")[:60]
+        items.append(d)
+    return {"items": items}
+
+
+@router.get("/api/conversations/{conv_id}")
+def get_conversation(conv_id: int, conn: ConnDep) -> dict:
+    conv = _fetch_conversation(conn, conv_id)
+    msgs = [
+        {
+            "id": m["id"],
+            "role": m["role"],
+            "kind": m["kind"],
+            "content": m["content"],
+            "created_at": m["created_at"],
+        }
+        for m in _conv_messages(conn, conv_id)
+    ]
+    return {"id": conv["id"], "status": conv["status"], "context_note_id": conv["context_note_id"],
+            "created_at": conv["created_at"], "messages": msgs}
+
+
+# ---------------------------------------------------------------------------
+# 笔记端点
+# ---------------------------------------------------------------------------
+
+@router.post("/api/notes", status_code=202)
+def create_note(body: dict, conn: ConnDep, rq: QueueDep) -> dict:
+    raw = (body.get("raw") or "").strip()
+    kind = body.get("kind", "note")
+    if not raw:
+        raise HTTPException(status_code=422, detail="raw 不能为空")
+    if kind not in ("note", "interest"):
+        raise HTTPException(status_code=422, detail="kind 须为 note 或 interest")
+    note = notes.create_note_direct(conn, raw, kind)
+    conn.commit()
+    rq.submit(note["id"])
+    return {"note_id": note["id"]}
+
+
+def query_notes(
+    conn: sqlite3.Connection,
+    *,
+    category: str | None = None,
+    kind: str | None = None,
+    importance: int | None = None,
+    q: str | None = None,
+    page: int = 1,
+) -> dict:
+    """笔记列表查询：SQL 等值过滤（category/kind/importance）+ q 检索（FTS trigram + LIKE 兜底，§7）。"""
+    where = ["status != 'merged'"]
+    params: list = []
+    if category:
+        where.append("category = ?")
+        params.append(category)
+    if kind:
+        where.append("kind = ?")
+        params.append(kind)
+    if importance:
+        where.append("importance = ?")
+        params.append(importance)
+
+    if q and q.strip():
+        words = [w for w in re.split(r"\s+", q.strip()) if w]
+        ids: set[int] | None = None
+        for w in words:
+            hit: set[int] = set()
+            if len(w) >= 3:  # trigram 只匹配 >= 3 字符（§4 关键点 3）
+                try:
+                    rows = conn.execute(
+                        "SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?",
+                        ('"' + w.replace('"', '""') + '"',),
+                    ).fetchall()
+                    hit |= {r["rowid"] for r in rows}
+                except sqlite3.OperationalError:
+                    pass
+            # 双字词/单字词兜底：LIKE（§7「双字词列表搜索兜底」）；tags 用 EXISTS 子查询
+            like = f"%{w}%"
+            rows = conn.execute(
+                """SELECT id FROM notes WHERE raw LIKE ? OR title LIKE ? OR summary LIKE ?
+                       OR content LIKE ?
+                       OR EXISTS (SELECT 1 FROM tags t WHERE t.note_id = notes.id AND t.tag LIKE ?)""",
+                (like, like, like, like, like),
+            ).fetchall()
+            hit |= {r["id"] for r in rows}
+            ids = hit if ids is None else (ids & hit)  # 多词 AND
+        if ids:
+            placeholders = ",".join("?" * len(ids))
+            where.append(f"id IN ({placeholders})")
+            params.extend(sorted(ids))
+        elif ids is not None:
+            where.append("0 = 1")  # 多词 AND 无交集 → 空结果
+
+    where_sql = " AND ".join(where)
+    total = conn.execute(f"SELECT COUNT(*) FROM notes WHERE {where_sql}", params).fetchone()[0]
+    page = max(1, page)
+    offset = (page - 1) * config.NOTES_PAGE_SIZE
+    rows = conn.execute(
+        f"""SELECT * FROM notes WHERE {where_sql}
+            ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?""",
+        params + [config.NOTES_PAGE_SIZE, offset],
+    ).fetchall()
+    items = []
+    for r in rows:
+        tags = [t["tag"] for t in conn.execute(
+            "SELECT tag FROM tags WHERE note_id = ? ORDER BY tag", (r["id"],))]
+        items.append(db.note_to_dict(r, tags))
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": config.NOTES_PAGE_SIZE,
+        "pages": (total + config.NOTES_PAGE_SIZE - 1) // config.NOTES_PAGE_SIZE,
+    }
+
+
+@router.get("/api/notes")
+def list_notes(
+    conn: ConnDep,
+    category: str | None = None,
+    kind: str | None = None,
+    importance: int | None = None,
+    q: str | None = None,
+    page: int = 1,
+) -> dict:
+    return query_notes(conn, category=category, kind=kind, importance=importance, q=q, page=page)
+
+
+# ---------------------------------------------------------------------------
+# Web 页面（§8：服务端渲染 + 少量原生 JS，移动端优先，中文）
+# ---------------------------------------------------------------------------
+
+@router.get("/", response_class=HTMLResponse)
+def index_page(request: Request, conn: ConnDep) -> HTMLResponse:
+    recent = query_notes(conn, page=1)["items"][:10]
+    drafts = conn.execute(
+        """SELECT c.id, c.updated_at,
+                  (SELECT content FROM messages m WHERE m.conversation_id = c.id
+                    AND m.role='user' AND m.kind='text' ORDER BY m.id DESC LIMIT 1) AS preview
+           FROM conversations c WHERE c.status='draft' ORDER BY c.updated_at DESC"""
+    ).fetchall()
+    return TEMPLATES.TemplateResponse(
+        request, "index.html",
+        {"recent": recent, "drafts": [dict(d) for d in drafts], "categories": config.CATEGORIES},
+    )
+
+
+@router.get("/conversations/{conv_id}", response_class=HTMLResponse)
+def chat_page(request: Request, conv_id: int, conn: ConnDep) -> HTMLResponse:
+    conv = _fetch_conversation(conn, conv_id)
+    msgs = _conv_messages(conn, conv_id)
+    return TEMPLATES.TemplateResponse(
+        request, "chat.html",
+        {"conv": dict(conv), "messages": [dict(m) for m in msgs]},
+    )
+
+
+@router.get("/notes", response_class=HTMLResponse)
+def notes_page(
+    request: Request, conn: ConnDep,
+    category: str | None = None, kind: str | None = None, q: str | None = None, page: int = 1,
+) -> HTMLResponse:
+    data = query_notes(conn, category=category, kind=kind, q=q, page=page)
+    return TEMPLATES.TemplateResponse(
+        request, "notes.html",
+        {"data": data, "categories": config.CATEGORIES,
+         "cur_category": category, "cur_kind": kind, "cur_q": q or ""},
+    )
