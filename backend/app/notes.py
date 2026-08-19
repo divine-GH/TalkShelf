@@ -183,7 +183,7 @@ def latest_organized(msgs: list[sqlite3.Row]) -> dict | None:
 
 # PUT 允许更新的字段白名单（§5：任意字段；status/created_at 等系统字段不可改）
 UPDATABLE_FIELDS = {
-    "raw", "title", "category", "summary", "content",
+    "raw", "title", "category", "summary", "content", "tags",
     "importance", "kind", "source_url", "done_at",
 }
 

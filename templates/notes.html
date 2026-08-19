@@ -37,7 +37,7 @@
       {% if n.status == 'failed' %}<span class="badge badge-warn">整理失败</span>{% endif %}
       {% if n.status == 'duplicate' %}<span class="badge badge-warn">疑似重复</span>{% endif %}
     </div>
-    <div class="note-title">{{ n.title or n.raw[:40] }}</div>
+    <div class="note-title"><a class="note-link" href="/notes/{{ n.id }}">{{ n.title or n.raw[:40] }}</a></div>
     {% if n.summary %}<div class="note-summary">{{ n.summary }}</div>{% endif %}
     {% if n.content and n.content != n.summary %}<div class="note-content-preview">{{ n.content[:120] }}{% if n.content|length > 120 %}…{% endif %}</div>{% endif %}
     {% if n.tags %}<div class="note-tags">{% for t in n.tags %}<span class="tag">#{{ t }}</span>{% endfor %}</div>{% endif %}

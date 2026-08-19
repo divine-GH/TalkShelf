@@ -237,6 +237,9 @@ def _confirm(conn: sqlite3.Connection, conv_id: int, kind: str, rq: queue_mod.Re
         raise HTTPException(status_code=404, detail=str(e)) from e
     except notes.ConflictError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    if conv["context_note_id"]:
+        # 修正对话更新了目标笔记（raw/元数据变化）→ 删向量强制重算（§4.3 重整理管线；M2 曾漏）
+        conn.execute("DELETE FROM embeddings WHERE note_id = ?", (conv["context_note_id"],))
     conn.commit()
     rq.submit(note["id"])  # 补做管线（FTS 幂等同步 + 查重；pending 另有 LLM 整理）
     return {"note": note, "degraded": degraded}
@@ -511,6 +514,148 @@ def delete_note(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# 笔记详情端点（M3，设计文档 §8 详情页 / §6.2 合并忽略 / §5 PUT、reprocess）
+# ---------------------------------------------------------------------------
+
+def _note_detail(conn: sqlite3.Connection, note_id: int) -> dict:
+    """详情数据：笔记 + 查重目标 + 来源对话（archived 且 note_id 关联，含修正对话）。"""
+    note = db.fetch_note(conn, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+    note["entities"] = [dict(e) for e in conn.execute(
+        "SELECT type, name FROM entities WHERE note_id = ? ORDER BY name", (note_id,))]
+    dup_target = None
+    if note.get("duplicate_of"):
+        t = db.fetch_note(conn, note["duplicate_of"])
+        if t:
+            dup_target = {"id": t["id"], "title": t["title"], "status": t["status"]}
+    conversations = []
+    convs = conn.execute(
+        """SELECT id, status, context_note_id, created_at, updated_at
+           FROM conversations WHERE note_id = ? AND status = 'archived' ORDER BY id""",
+        (note_id,),
+    ).fetchall()
+    for c in convs:
+        msgs = [dict(m) for m in conn.execute(
+            "SELECT id, role, kind, content, created_at FROM messages WHERE conversation_id = ? ORDER BY id",
+            (c["id"],),
+        )]
+        conversations.append({**dict(c), "messages": msgs})
+    return {"note": note, "duplicate_target": dup_target, "conversations": conversations}
+
+
+@router.get("/api/notes/{note_id}")
+def get_note_detail(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """单条详情（含来源对话；merged 笔记也返回——页面展示「已合并至 #x」引导）。"""
+    return _note_detail(conn, note_id)
+
+
+def _validate_put_fields(body: dict) -> dict:
+    """PUT 字段白名单 + 取值校验（§5：任意字段；系统字段不可改）。"""
+    unknown = set(body) - notes.UPDATABLE_FIELDS
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"不允许更新的字段: {', '.join(sorted(unknown))}")
+    fields: dict = {}
+    for k in ("raw", "title", "summary", "content", "source_url", "done_at"):
+        if k in body:
+            v = body[k]
+            fields[k] = None if v is None or (isinstance(v, str) and not v.strip()) else str(v).strip()
+    if "category" in body:
+        cat = body["category"]
+        if cat is not None and cat not in config.CATEGORIES:
+            raise HTTPException(status_code=422, detail=f"category 不在体系内: {cat}")
+        fields["category"] = cat
+    if "kind" in body:
+        kind = body["kind"]
+        if kind not in ("note", "interest"):
+            raise HTTPException(status_code=422, detail="kind 须为 note 或 interest")
+        fields["kind"] = kind
+    if "tags" in body:
+        tags = body["tags"]
+        if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+            raise HTTPException(status_code=422, detail="tags 须为字符串列表")
+        fields["tags"] = tags
+    if "importance" in body:
+        imp = body["importance"]
+        if imp not in (1, 2, 3):
+            raise HTTPException(status_code=422, detail="importance 须为 1/2/3")
+        fields["importance"] = imp
+    if "source_url" in fields and fields["source_url"] is not None \
+            and not fields["source_url"].startswith(("http://", "https://")):
+        raise HTTPException(status_code=422, detail="source_url 须为 http(s) URL 或空")
+    return fields
+
+
+@router.put("/api/notes/{note_id}")
+def update_note_api(note_id: int, body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
+    """完整编辑（§5）：更新任意字段 → 触发重整理（删向量重算 embedding + 重建 FTS + 重新查重）。"""
+    note = db.fetch_note(conn, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+    if note["status"] == "merged":
+        raise HTTPException(status_code=409, detail="已合并的笔记不可编辑")
+    fields = _validate_put_fields(body)
+    try:
+        updated = notes.update_note(conn, note_id, fields)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    conn.execute("DELETE FROM embeddings WHERE note_id = ?", (note_id,))  # 强制重算向量
+    conn.commit()
+    rq.submit(note_id, dedup=True)
+    return updated
+
+
+@router.post("/api/notes/{note_id}/reprocess")
+def reprocess_note_api(note_id: int, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
+    """手动重新整理（§5）：清元数据 + 置 pending + 删向量，队列完整重跑（整理→embedding→查重→FTS）。"""
+    try:
+        note = notes.reprocess_note(conn, note_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except notes.ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    conn.commit()
+    rq.submit(note_id, dedup=True)
+    return note
+
+
+@router.post("/api/notes/{note_id}/merge")
+def merge_note_api(note_id: int, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
+    """查重「合并」（§6.2）：raw 并入 duplicate_of 目标 → 目标重整理；本条软删除 merged + 出索引。
+
+    返回合并后的目标笔记（详情页可跳转）。
+    """
+    note = db.fetch_note(conn, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+    target_id = note.get("duplicate_of")
+    if not target_id:
+        raise HTTPException(status_code=409, detail="缺少合并目标（查重未记录 duplicate_of，请先忽略或删除）")
+    try:
+        target = notes.merge_note(conn, note_id, target_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    conn.commit()
+    rq.submit(target_id, dedup=True)  # 目标 raw 变了：重算 embedding + 重新查重（§6.2）
+    return target
+
+
+@router.post("/api/notes/{note_id}/ignore")
+def ignore_note_api(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """查重「忽略」（§6.2）：duplicate → processed，清 duplicate_of（用户判定不重复）。"""
+    note = db.fetch_note(conn, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+    if note["status"] != "duplicate":
+        raise HTTPException(status_code=409, detail="仅疑似重复的笔记可忽略")
+    updated = notes.ignore_duplicate(conn, note_id)
+    conn.commit()
+    return updated
+
+
+# ---------------------------------------------------------------------------
 # 问答端点（设计文档 §7：单轮无状态；向量+FTS+RRF+材料层兜底 + LLM 作答带引用）
 # ---------------------------------------------------------------------------
 
@@ -646,4 +791,14 @@ def notes_page(
         {"data": data, "categories": config.CATEGORIES,
          "cur_category": category, "cur_kind": kind, "cur_q": q or "",
          "active": "notes"},
+    )
+
+
+@router.get("/notes/{note_id}", response_class=HTMLResponse)
+def note_detail_page(request: Request, note_id: int, conn: ConnDep, _sess: PageAuthDep) -> HTMLResponse:
+    """笔记详情页（§8：展示 + 完整编辑 + 修正入口 + 来源对话 + 合并/忽略 + 重新整理 + 删除）。"""
+    data = _note_detail(conn, note_id)
+    return render(
+        request, "note_detail.html",
+        {**data, "categories": config.CATEGORIES, "active": "notes"},
     )

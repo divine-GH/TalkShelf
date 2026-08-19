@@ -113,7 +113,7 @@
       if (data.degraded) extra = '（AI 整理暂不可用，已原文保存，稍后自动补整理）';
       if (data.note.status === 'duplicate') extra += '（标为疑似重复，可在列表查看）';
       btn.textContent = '已保存 #' + data.note.id + extra;
-      setTimeout(() => { location.href = '/notes'; }, 1200);
+      setTimeout(() => { location.href = '/notes/' + data.note.id; }, 1200);
     } catch (ex) {
       btn.disabled = false;
       showError(label + '失败：' + ex.message);

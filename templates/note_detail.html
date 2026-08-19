@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}{{ note.title or ('笔记 #' ~ note.id) }} — note-brain{% endblock %}
+
+{% block content %}
+<div class="note-detail">
+
+  {% if note.status == 'merged' %}
+  <div class="banner banner-merged">此笔记已合并至 <a href="/notes/{{ note.merged_into }}">#{{ note.merged_into }}</a>（软删除态，不再参与检索）。</div>
+  {% endif %}
+
+  {% if note.status == 'duplicate' %}
+  <div class="banner banner-duplicate">
+    疑似重复于
+    {% if duplicate_target %}<a href="/notes/{{ duplicate_target.id }}">#{{ duplicate_target.id }}《{{ duplicate_target.title or '无标题' }}》</a>
+    {% else %}未知目标（查重未记录）{% endif %}
+    <span class="banner-actions">
+      <button id="merge-btn" class="btn btn-primary">合并到目标</button>
+      <button id="ignore-btn" class="btn">忽略（保留）</button>
+    </span>
+  </div>
+  {% endif %}
+
+  {% if note.status == 'failed' %}<div class="banner banner-warn">整理失败：可点下方「重新整理」重试。</div>{% endif %}
+  {% if note.status == 'pending' %}<div class="banner banner-warn">整理中（直存/重新整理中）…</div>{% endif %}
+
+  <div class="note-head">
+    <span class="badge kind-{{ note.kind }}">{{ '兴趣' if note.kind == 'interest' else '收藏' }}</span>
+    {% if note.category %}<span class="badge">{{ note.category }}</span>{% endif %}
+    <span class="note-meta">#{{ note.id }} · {{ note.created_at }}</span>
+    {% if note.done_at %}<span class="badge">做过：{{ note.done_at }}</span>{% endif %}
+  </div>
+  <h1 class="detail-title">{{ note.title or note.raw[:40] }}</h1>
+  {% if note.summary %}<p class="detail-summary">{{ note.summary }}</p>{% endif %}
+
+  {% if note.content %}
+  <section class="section">
+    <h2>正文</h2>
+    <div class="detail-content">{{ note.content }}</div>
+  </section>
+  {% endif %}
+
+  {% if note.tags %}<div class="note-tags">{% for t in note.tags %}<span class="tag">#{{ t }}</span>{% endfor %}</div>{% endif %}
+  {% if note.entities %}
+  <div class="detail-entities">关键实体：{% for e in note.entities %}<span class="tag">{{ e.name }}（{{ e.type }}）</span>{% endfor %}</div>
+  {% endif %}
+  {% if note.source_url %}<p class="source-link"><a href="{{ note.source_url }}" target="_blank" rel="noopener">来源 ↗</a></p>{% endif %}
+
+  <details class="raw-details"><summary>原文（raw）</summary><pre class="raw-text">{{ note.raw }}</pre></details>
+
+  {% if note.kind == 'interest' and note.status != 'merged' %}
+  <div class="actions-bar">
+    {% if not note.done_at %}
+    <button class="btn btn-primary act-done" data-id="{{ note.id }}">去做</button>
+    {% else %}
+    <button class="btn act-snooze" data-id="{{ note.id }}">稍后</button>
+    <button class="btn btn-primary act-convert" data-id="{{ note.id }}">转收藏</button>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if note.status != 'merged' %}
+  <section class="section">
+    <h2>完整编辑</h2>
+    <form id="edit-form" class="edit-form">
+      <label>原文 raw（用户原话，永远可检索）
+        <textarea name="raw" rows="3" required>{{ note.raw }}</textarea>
+      </label>
+      <label>标题 <input name="title" value="{{ note.title or '' }}"></label>
+      <label>分类
+        <select name="category">
+          <option value="">（未分类）</option>
+          {% for cat in categories %}<option value="{{ cat }}" {% if note.category == cat %}selected{% endif %}>{{ cat }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>标签（逗号分隔） <input name="tags" value="{{ note.tags|join(', ') }}"></label>
+      <label>摘要 <textarea name="summary" rows="2">{{ note.summary or '' }}</textarea></label>
+      <label>整理稿正文 content <textarea name="content" rows="6">{{ note.content or '' }}</textarea></label>
+      <div class="form-row">
+        <label>重要程度
+          <select name="importance">
+            {% for v in [1, 2, 3] %}<option value="{{ v }}" {% if note.importance == v %}selected{% endif %}>{{ v }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>类型 kind
+          <select name="kind">
+            <option value="note" {% if note.kind == 'note' %}selected{% endif %}>收藏</option>
+            <option value="interest" {% if note.kind == 'interest' %}selected{% endif %}>兴趣</option>
+          </select>
+        </label>
+      </div>
+      <label>来源 URL <input name="source_url" value="{{ note.source_url or '' }}" placeholder="https://…"></label>
+      <button type="submit" class="btn btn-primary">保存（触发重新整理）</button>
+      <span id="edit-msg" class="hint"></span>
+    </form>
+  </section>
+
+  <section class="section">
+    <h2>修正对话</h2>
+    <p class="hint">整理有误？发起对话修改本条：AI 会带上当前内容上下文，拍板后直接更新本笔记。</p>
+    <form id="fix-form" class="record-form">
+      <textarea id="fix-input" rows="2" placeholder="例如：把标题改成…、补充一个细节…"></textarea>
+      <button type="submit" class="btn btn-primary">发起修正对话</button>
+    </form>
+    <p id="fix-error" class="error" hidden></p>
+  </section>
+  {% endif %}
+
+  <section class="section">
+    <h2>来源对话（{{ conversations|length }}）</h2>
+    {% for c in conversations %}
+    <details class="conv-details">
+      <summary>对话 #{{ c.id }}{% if c.context_note_id %}（修正对话）{% endif %} · {{ c.created_at }}</summary>
+      <div class="messages">
+        {% for m in c.messages %}
+        <div class="msg msg-{{ m.role }} msg-{{ m.kind }}">
+          {% if m.kind == 'fetched_page' %}
+          <div class="msg-material" title="抓取的网页正文（来源材料）"><pre>{{ m.content }}</pre></div>
+          {% else %}
+          <div class="msg-text">{{ m.content }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+    {% else %}
+    <p class="empty">无来源对话。</p>
+    {% endfor %}
+  </section>
+
+  {% if note.status != 'merged' %}
+  <section class="section actions-bar">
+    <button id="reprocess-btn" class="btn">重新整理</button>
+    <button id="delete-btn" class="btn btn-danger">删除</button>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+  const noteId = {{ note.id }};
+  const noteStatus = {{ note.status|tojson }};
+
+  async function post(path, method, body) {
+    const resp = await fetch(path, {
+      method: method,
+      headers: body ? {'Content-Type': 'application/json'} : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+    return data;
+  }
+
+  // 保存编辑（PUT，触发重整理）
+  document.getElementById('edit-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const msg = document.getElementById('edit-msg');
+    const btn = this.querySelector('button[type=submit]');
+    btn.disabled = true;
+    const f = this.elements;
+    try {
+      await post('/api/notes/' + noteId, 'PUT', {
+        raw: f.raw.value,
+        title: f.title.value,
+        category: f.category.value || null,
+        tags: f.tags.value.split(/[,，]/).map(s => s.trim()).filter(Boolean),
+        summary: f.summary.value,
+        content: f.content.value,
+        importance: parseInt(f.importance.value, 10),
+        kind: f.kind.value,
+        source_url: f.source_url.value,
+      });
+      msg.textContent = '已保存，重新整理中…';
+      setTimeout(() => location.reload(), 800);
+    } catch (ex) {
+      msg.textContent = '保存失败：' + ex.message;
+      btn.disabled = false;
+    }
+  });
+
+  // 修正对话入口（context_note_id 关联本笔记，§4.3）
+  document.getElementById('fix-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const input = document.getElementById('fix-input');
+    const err = document.getElementById('fix-error');
+    const msg = input.value.trim();
+    if (!msg) return;
+    err.hidden = true;
+    const btn = this.querySelector('button');
+    btn.disabled = true;
+    try {
+      const data = await post('/api/conversations', 'POST', {message: msg, context_note_id: noteId});
+      location.href = '/conversations/' + data.conversation_id;
+    } catch (ex) {
+      err.textContent = '发起修正对话失败：' + ex.message;
+      err.hidden = false;
+      btn.disabled = false;
+    }
+  });
+
+  // 合并 / 忽略（§6.2）
+  const mergeBtn = document.getElementById('merge-btn');
+  if (mergeBtn) mergeBtn.addEventListener('click', async function () {
+    if (!confirm('把本条内容并入重复目标（本条软删除，不再参与检索）？')) return;
+    try {
+      const t = await post('/api/notes/' + noteId + '/merge', 'POST');
+      location.href = '/notes/' + t.id;
+    } catch (ex) { alert('合并失败：' + ex.message); }
+  });
+  const ignoreBtn = document.getElementById('ignore-btn');
+  if (ignoreBtn) ignoreBtn.addEventListener('click', async function () {
+    if (!confirm('忽略重复标记，保留本条？')) return;
+    try { await post('/api/notes/' + noteId + '/ignore', 'POST'); location.reload(); }
+    catch (ex) { alert('操作失败：' + ex.message); }
+  });
+
+  // 重新整理 / 删除
+  document.getElementById('reprocess-btn').addEventListener('click', async function () {
+    if (!confirm('清空现有整理结果并重新整理（AI 重新生成标题/分类/摘要等）？')) return;
+    try { await post('/api/notes/' + noteId + '/reprocess', 'POST'); location.reload(); }
+    catch (ex) { alert('重新整理失败：' + ex.message); }
+  });
+  document.getElementById('delete-btn').addEventListener('click', async function () {
+    if (!confirm('删除这条笔记？不可恢复（含来源对话）。')) return;
+    try {
+      const resp = await fetch('/api/notes/' + noteId, {method: 'DELETE'});
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}));
+        throw new Error(d.detail || ('HTTP ' + resp.status));
+      }
+      location.href = '/notes';
+    } catch (ex) { alert('删除失败：' + ex.message); }
+  });
+
+  // 兴趣动作（去做/稍后/转收藏，与回顾页一致）
+  document.querySelectorAll('.act-done').forEach(b => b.addEventListener('click', async () => {
+    try { await post('/api/notes/' + b.dataset.id + '/done', 'POST'); location.reload(); }
+    catch (ex) { alert('操作失败：' + ex.message); }
+  }));
+  document.querySelectorAll('.act-snooze').forEach(b => b.addEventListener('click', async () => {
+    try { await post('/api/notes/' + b.dataset.id + '/snooze', 'POST'); location.reload(); }
+    catch (ex) { alert('操作失败：' + ex.message); }
+  }));
+  document.querySelectorAll('.act-convert').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('转为收藏？条目将从回顾清单移入笔记库。')) return;
+    try { await post('/api/notes/' + b.dataset.id + '/convert', 'POST'); location.reload(); }
+    catch (ex) { alert('操作失败：' + ex.message); }
+  }));
+</script>
+{% endblock %}

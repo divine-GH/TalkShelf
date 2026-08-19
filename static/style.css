@@ -214,3 +214,46 @@ textarea:focus, input:focus { outline: 2px solid var(--primary); outline-offset:
 
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; }
 .page-info { color: var(--muted); font-size: 0.85rem; }
+
+/* ---- 笔记详情页（M3） ---- */
+.note-link { color: inherit; text-decoration: none; }
+.note-link:hover { color: var(--primary); }
+.detail-title { font-size: 1.4rem; margin: 4px 0 6px; }
+.detail-summary { color: #333; margin: 0 0 8px; }
+.detail-content { white-space: pre-wrap; word-break: break-word; }
+.detail-entities { margin-top: 8px; color: var(--muted); font-size: 0.9rem; }
+.actions-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.banner {
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 0.95rem;
+}
+.banner a { color: inherit; font-weight: 600; }
+.banner-duplicate { background: var(--warn-bg); color: var(--warn-text); }
+.banner-merged { background: #eef1f5; color: #4a5568; }
+.banner-warn { background: var(--warn-bg); color: var(--warn-text); }
+.banner-actions { margin-left: 8px; }
+.banner-actions .btn { padding: 4px 12px; font-size: 0.85rem; }
+
+.edit-form { display: flex; flex-direction: column; gap: 10px; }
+.edit-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; color: #333; }
+.edit-form input, .edit-form select, .edit-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: inherit;
+  background: var(--card);
+}
+.edit-form .form-row { display: flex; gap: 10px; }
+.edit-form .form-row label { flex: 1; }
+.conv-details {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+.conv-details summary { cursor: pointer; color: #333; font-size: 0.92rem; }
+.conv-details .messages { max-height: 50vh; overflow-y: auto; padding-top: 8px; }
