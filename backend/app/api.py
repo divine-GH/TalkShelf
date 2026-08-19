@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from . import config, db, fetch, llm, notes, queue as queue_mod
+from . import config, db, fetch, llm, notes, queue as queue_mod, retrieval
 
 logger = logging.getLogger(__name__)
 
@@ -352,6 +352,33 @@ def list_notes(
 
 
 # ---------------------------------------------------------------------------
+# 问答端点（设计文档 §7：单轮无状态；向量+FTS+RRF+材料层兜底 + LLM 作答带引用）
+# ---------------------------------------------------------------------------
+
+@router.post("/api/ask")
+def ask_question(body: dict, conn: ConnDep) -> dict:
+    question = (body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="question 不能为空")
+    result = retrieval.retrieve(conn, question)
+    try:
+        answer = llm.answer_question(
+            question, result["notes"], result["materials"], result["weak_recall"]
+        )
+    except llm.LLMError as e:
+        logger.warning("问答生成失败: %s", e)
+        raise HTTPException(status_code=502, detail=f"问答服务不可用: {e}") from e
+    return {
+        "question": question,
+        "answer": answer,
+        "sources": result["notes"],
+        "material_sources": result["materials"],
+        "vector_ok": result["vector_ok"],
+        "weak_recall": result["weak_recall"],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Web 页面（§8：服务端渲染 + 少量原生 JS，移动端优先，中文）
 # ---------------------------------------------------------------------------
 
@@ -366,8 +393,14 @@ def index_page(request: Request, conn: ConnDep) -> HTMLResponse:
     ).fetchall()
     return TEMPLATES.TemplateResponse(
         request, "index.html",
-        {"recent": recent, "drafts": [dict(d) for d in drafts], "categories": config.CATEGORIES},
+        {"recent": recent, "drafts": [dict(d) for d in drafts], "categories": config.CATEGORIES,
+         "active": "index"},
     )
+
+
+@router.get("/ask", response_class=HTMLResponse)
+def ask_page(request: Request) -> HTMLResponse:
+    return TEMPLATES.TemplateResponse(request, "ask.html", {"active": "ask"})
 
 
 @router.get("/conversations/{conv_id}", response_class=HTMLResponse)
@@ -376,7 +409,7 @@ def chat_page(request: Request, conv_id: int, conn: ConnDep) -> HTMLResponse:
     msgs = _conv_messages(conn, conv_id)
     return TEMPLATES.TemplateResponse(
         request, "chat.html",
-        {"conv": dict(conv), "messages": [dict(m) for m in msgs]},
+        {"conv": dict(conv), "messages": [dict(m) for m in msgs], "active": "index"},
     )
 
 
@@ -389,5 +422,6 @@ def notes_page(
     return TEMPLATES.TemplateResponse(
         request, "notes.html",
         {"data": data, "categories": config.CATEGORIES,
-         "cur_category": category, "cur_kind": kind, "cur_q": q or ""},
+         "cur_category": category, "cur_kind": kind, "cur_q": q or "",
+         "active": "notes"},
     )

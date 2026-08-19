@@ -27,7 +27,13 @@ def test_pending_note_searchable_immediately(client, llm_down, db_path):
 
 
 def test_degraded_confirm_goes_pending_then_recovers(client, llm_down, db_path, monkeypatch):
-    """拍板时 LLM 挂 → 直存 pending（返回 degraded 提示）→ LLM 恢复 → 队列自动补整理（§14 第 5 条）。"""
+    """拍板时 LLM 挂 → 直存 pending（返回 degraded 提示）→ LLM 恢复 → 队列退避重试自动补整理（§14 第 5 条）。
+
+    ⚠️ 必须缩短 BACKOFF_SCHEDULE：默认退避首档 60s，wait_for 3s 等不到重试（M1 遗留的沉睡测试 bug）。
+    """
+    from app import config
+
+    monkeypatch.setattr(config, "BACKOFF_SCHEDULE", [0.05, 0.05, 0.05, 0.05, 0.05])
     conv_id = client.post("/api/conversations", json={"message": "DeepSeek 挂了也能记"}).json()["conversation_id"]
     # 对话中 LLM 挂：降级提示
     resp = client.post(f"/api/conversations/{conv_id}/messages", json={"message": "再补一句"})

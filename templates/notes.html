@@ -29,7 +29,7 @@
 {% if data['items'] %}
 <ul class="note-list">
   {% for n in data['items'] %}
-  <li class="note-item">
+  <li class="note-item" id="note-{{ n.id }}">
     <div class="note-head">
       <span class="badge kind-{{ n.kind }}">{{ '兴趣' if n.kind == 'interest' else '收藏' }}</span>
       {% if n.category %}<span class="badge">{{ n.category }}</span>{% endif %}

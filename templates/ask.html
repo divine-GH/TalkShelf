@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}问答 — note-brain{% endblock %}
+
+{% block content %}
+<section class="ask-entry">
+  <h1>问点什么</h1>
+  <p class="hint">用对话的方式找回记过的内容。单轮问答：答案带引用来源，点击可跳转原笔记。</p>
+  <form id="ask-form" class="record-form">
+    <textarea id="ask-input" rows="3" placeholder="例如：我上次记的那个上传文件的坑是啥？" autofocus></textarea>
+    <button type="submit" class="btn btn-primary btn-lg">提问</button>
+  </form>
+  <p id="ask-error" class="error" hidden></p>
+</section>
+
+<section class="section" id="ask-result" hidden>
+  <h2>答案</h2>
+  <div id="ask-answer" class="ask-answer"></div>
+  <p id="ask-vector-warn" class="warn" hidden>⚠️ 语义检索暂不可用（本地向量服务未运行），当前为关键词检索。</p>
+  <p id="ask-weak-warn" class="warn" hidden>笔记库可能没有与问题直接相关的内容，答案可能不准确。</p>
+
+  <h2>引用来源</h2>
+  <ul id="ask-sources" class="note-list"></ul>
+  <ul id="ask-material-sources" class="note-list"></ul>
+</section>
+{% endblock %}
+
+{% block script %}
+<script>
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  function renderAnswer(data) {
+    const result = document.getElementById('ask-result');
+    result.hidden = false;
+    document.getElementById('ask-answer').innerHTML =
+      '<p>' + esc(data.answer).replace(/\n/g, '<br>') + '</p>';
+    document.getElementById('ask-vector-warn').hidden = data.vector_ok;
+    document.getElementById('ask-weak-warn').hidden = !data.weak_recall;
+
+    const srcList = document.getElementById('ask-sources');
+    srcList.innerHTML = '';
+    (data.sources || []).forEach(function (s) {
+      const li = document.createElement('li');
+      li.className = 'note-item';
+      li.innerHTML =
+        '<div class="note-head"><span class="badge">引用</span>' +
+        (s.id ? '<a class="note-title" href="/notes#note-' + s.id + '">' + esc(s.title) + '</a>' : '') +
+        '</div>' +
+        (s.snippet ? '<div class="note-summary">' + esc(s.snippet) + '</div>' : '') +
+        (s.url ? '<div class="note-meta"><a class="source-link" href="' + esc(s.url) + '" target="_blank" rel="noopener">来源 ↗</a></div>' : '');
+      srcList.appendChild(li);
+    });
+
+    const matList = document.getElementById('ask-material-sources');
+    matList.innerHTML = '';
+    (data.material_sources || []).forEach(function (m) {
+      const li = document.createElement('li');
+      li.className = 'note-item';
+      const label = m.kind === 'fetched_page' ? '抓取正文' : '搜索结果';
+      li.innerHTML =
+        '<div class="note-head"><span class="badge badge-warn">命中于来源材料（' + label + '）</span>' +
+        '<span class="note-title">归属笔记 #' + m.note_id + '</span></div>' +
+        (m.snippet ? '<div class="note-summary">' + esc(m.snippet) + '</div>' : '') +
+        (m.url ? '<div class="note-meta"><a class="source-link" href="' + esc(m.url) + '" target="_blank" rel="noopener">来源 ↗</a></div>' : '');
+      matList.appendChild(li);
+    });
+    result.scrollIntoView({behavior: 'smooth'});
+  }
+
+  document.getElementById('ask-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const input = document.getElementById('ask-input');
+    const err = document.getElementById('ask-error');
+    const q = input.value.trim();
+    if (!q) return;
+    err.hidden = true;
+    const btn = this.querySelector('button');
+    btn.disabled = true;
+    btn.textContent = '思考中…';
+    try {
+      const resp = await fetch('/api/ask', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question: q}),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+      renderAnswer(data);
+    } catch (ex) {
+      err.textContent = '提问失败：' + ex.message;
+      err.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '提问';
+    }
+  });
+</script>
+{% endblock %}
