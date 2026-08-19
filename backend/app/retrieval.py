@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 
 import numpy as np
@@ -18,21 +19,54 @@ from . import config, db, embedding
 
 logger = logging.getLogger(__name__)
 
+_CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
+_TERM_LIMIT = 40  # 切词数量上限（防超长问题把 FTS 查询撑爆）
+
+
+def fts_query_terms(query: str) -> list[str]:
+    """FTS 查询切词（trigram 前提，只保留 >= 3 字符的词）。
+
+    - 英文/数字/符号 token：按空白切，原样保留（如 nginx、413、web_search）；
+    - 中文连续段：按 3-gram 滑动窗口切——trigram 索引的最小匹配单位就是 3 字子串，
+      整句作为查询词在中文场景几乎必然失败（§7「关键词召回」的落地实现；
+      M2 评测集 t-025 实测暴露整句缺陷后补充）。
+    - 2 字词无法 trigram 命中，交由向量路/列表搜索 LIKE 兜底（§4 关键点 3、§7）。
+    """
+    terms: list[str] = []
+    for seg in _CJK_RUN_RE.split(query):
+        for w in seg.split():
+            if len(w) >= 3:
+                terms.append(w)
+    for seg in _CJK_RUN_RE.findall(query):
+        if len(seg) >= 3:
+            terms.extend(seg[i : i + 3] for i in range(len(seg) - 2))
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in terms:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+        if len(out) >= _TERM_LIMIT:
+            break
+    return out
+
+
+def _match_expr(terms: list[str]) -> str:
+    return " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
+
 
 def fts_search(conn: sqlite3.Connection, query: str, top_k: int) -> list[int]:
-    """FTS5 trigram 关键词召回（BM25 排序）。查询词 <3 字符时跳过（trigram 限制，§4 关键点 3）。
+    """FTS5 trigram 关键词召回（BM25 排序）。无查询词时跳过（trigram 限制，§4 关键点 3）。
 
-    返回 notes.id 列表（含重复排序，交由 RRF 计算 rank；此处按 rank 升序已隐含）。
-    材料层召回用同函数（materials_fts）。
+    返回 notes.id 列表（按 rank 升序隐含排序）。材料层召回用同函数（materials_fts）。
     """
-    words = [w for w in query.split() if len(w) >= 3]
-    if not words:
+    terms = fts_query_terms(query)
+    if not terms:
         return []
-    expr = " OR ".join('"' + w.replace('"', '""') + '"' for w in words)
     try:
         rows = conn.execute(
             "SELECT rowid FROM notes_fts WHERE notes_fts MATCH ? ORDER BY rank LIMIT ?",
-            (expr, top_k),
+            (_match_expr(terms), top_k),
         ).fetchall()
     except sqlite3.OperationalError as e:
         logger.warning("FTS 检索查询失败（%s）", e)
@@ -44,16 +78,15 @@ def materials_fts_search(conn: sqlite3.Connection, query: str, top_k: int) -> li
     """材料层召回（Tier 2 兜底，§7）：materials_fts 关键词 Top-K，返回
     {id, note_id, kind, url, text} 列表（text 截断为摘要，供展示）。
     """
-    words = [w for w in query.split() if len(w) >= 3]
-    if not words:
+    terms = fts_query_terms(query)
+    if not terms:
         return []
-    expr = " OR ".join('"' + w.replace('"', '""') + '"' for w in words)
     try:
         rows = conn.execute(
             """SELECT m.id, m.note_id, m.kind, m.url, m.text
                FROM materials_fts f JOIN note_materials m ON m.id = f.rowid
                WHERE materials_fts MATCH ? ORDER BY rank LIMIT ?""",
-            (expr, top_k),
+            (_match_expr(terms), top_k),
         ).fetchall()
     except sqlite3.OperationalError as e:
         logger.warning("材料 FTS 检索查询失败（%s）", e)
