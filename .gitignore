@@ -12,6 +12,7 @@ __pycache__/
 *.db-shm
 .ollama/
 data/
+!backend/app/data/
 
 # 测试临时目录
 .pytest-tmp/
