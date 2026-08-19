@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}统计 — note-brain{% endblock %}
+
+{% block content %}
+<h1>统计</h1>
+
+<section class="section">
+  <h2>本周总结</h2>
+  <p class="hint">基于近 7 天记录的笔记生成一段中文周报（AI 生成，可能需要十几秒）。</p>
+  <button id="weekly-btn" class="btn btn-primary">生成本周总结</button>
+  <div id="weekly-result" hidden></div>
+  <p id="weekly-error" class="error" hidden></p>
+</section>
+
+<section class="section">
+  <h2>概览</h2>
+  <p class="hint">共 {{ total }} 条笔记（不含已合并）。</p>
+</section>
+
+<section class="section">
+  <h2>分类分布</h2>
+  {% if by_category %}
+  {% set max_cat = by_category[0].count if by_category else 1 %}
+  <ul class="stat-list">
+    {% for c in by_category %}
+    <li class="stat-row">
+      <span class="stat-label">{{ c.category }}</span>
+      <span class="stat-bar"><span class="stat-fill" style="width: {{ (c.count * 100 / max_cat)|round|int }}%"></span></span>
+      <span class="stat-count">{{ c.count }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">暂无数据。</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h2>热门标签</h2>
+  {% if top_tags %}
+  {% set max_tag = top_tags[0].count if top_tags else 1 %}
+  <ul class="stat-list">
+    {% for t in top_tags %}
+    <li class="stat-row">
+      <span class="stat-label">#{{ t.tag }}</span>
+      <span class="stat-bar"><span class="stat-fill stat-fill-tag" style="width: {{ (t.count * 100 / max_tag)|round|int }}%"></span></span>
+      <span class="stat-count">{{ t.count }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">暂无标签。</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h2>时间分布（近 12 个月）</h2>
+  {% if by_month %}
+  {% set max_month = by_month|map(attribute='count')|max %}
+  <ul class="stat-list">
+    {% for m in by_month %}
+    <li class="stat-row">
+      <span class="stat-label">{{ m.month }}</span>
+      <span class="stat-bar"><span class="stat-fill stat-fill-month" style="width: {{ (m.count * 100 / max_month)|round|int }}%"></span></span>
+      <span class="stat-count">{{ m.count }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">暂无数据。</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block script %}
+<script>
+  document.getElementById('weekly-btn').addEventListener('click', async function () {
+    const btn = this;
+    const box = document.getElementById('weekly-result');
+    const err = document.getElementById('weekly-error');
+    btn.disabled = true;
+    err.hidden = true;
+    box.hidden = true;
+    try {
+      const resp = await fetch('/api/weekly', {method: 'POST'});
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+      box.innerHTML = '';
+      const pre = document.createElement('div');
+      pre.className = 'detail-content weekly-text';
+      pre.textContent = data.summary;
+      box.appendChild(pre);
+      if (data.degraded) {
+        const hint = document.createElement('p');
+        hint.className = 'hint';
+        hint.textContent = '（AI 总结暂不可用，以上为统计降级结果）';
+        box.appendChild(hint);
+      }
+      box.hidden = false;
+    } catch (ex) {
+      err.textContent = '生成失败：' + ex.message;
+      err.hidden = false;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+</script>
+{% endblock %}

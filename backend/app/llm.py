@@ -387,3 +387,31 @@ def answer_question(question: str, notes: list[dict], materials: list[dict], wea
         {"role": "system", "content": ASK_SYSTEM_PROMPT},
         {"role": "user", "content": build_ask_user(question, notes, materials, weak_recall)},
     ])
+
+
+# ---------------------------------------------------------------------------
+# 每周总结（§5 POST /api/weekly；M3 拍板：LLM 生成，失败由调用方降级纯统计）
+# ---------------------------------------------------------------------------
+
+WEEKLY_PROMPT = """你是 note-brain 的每周总结助手。下面列出用户本周记录的笔记（编号 + 标题 + 分类 + 摘要），
+请生成一份简洁的中文周报：
+1. 归纳本周记录的主题与重点（按内容方向归类概述，不要逐条罗列）；
+2. 如有明显的数据/工具/灵感类内容可单独点一句；
+3. 开头写"本周共记录 N 条笔记"（N 按实际条数）。
+只输出周报正文，不要输出 JSON，不要使用 markdown 标题。"""
+
+
+def weekly_summary(notes: list[dict]) -> str:
+    """基于本周笔记生成周报文本。失败抛 LLMError（调用方降级为纯统计）。"""
+    if not notes:
+        return "本周没有新记录。"
+    lines = [
+        f"[{i + 1}] 《{n.get('title') or '无标题'}》（{n.get('category') or '未分类'}）"
+        f"{n.get('summary') or n.get('raw', '')[:100]}"
+        for i, n in enumerate(notes)
+    ]
+    user = f"本周共 {len(notes)} 条笔记：\n" + "\n".join(lines)
+    return _call_chat([
+        {"role": "system", "content": WEEKLY_PROMPT},
+        {"role": "user", "content": user},
+    ])

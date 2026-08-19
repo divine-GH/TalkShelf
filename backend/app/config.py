@@ -134,3 +134,4 @@ def auth_enabled() -> bool:
 # Web（设计文档 §8）
 # ---------------------------------------------------------------------------
 NOTES_PAGE_SIZE = _env_int("NOTES_PAGE_SIZE", 20)
+STATS_TOP_TAGS = _env_int("STATS_TOP_TAGS", 15)  # 统计页标签 Top-N

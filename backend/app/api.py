@@ -656,6 +656,62 @@ def ignore_note_api(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# 统计与每周总结（设计文档 §5 / §8 统计页；M3）
+# ---------------------------------------------------------------------------
+
+@router.get("/api/stats")
+def stats(conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """统计（§5：按分类/标签/时间分布）；merged 软删除态不计入。"""
+    scope = "status != 'merged'"
+    total = conn.execute(f"SELECT COUNT(*) FROM notes WHERE {scope}").fetchone()[0]
+    by_category = [
+        {"category": r["category"] or "未分类", "count": r["c"]}
+        for r in conn.execute(
+            f"SELECT category, COUNT(*) AS c FROM notes WHERE {scope} "
+            "GROUP BY category ORDER BY c DESC, category"
+        )
+    ]
+    top_tags = [
+        {"tag": r["tag"], "count": r["c"]}
+        for r in conn.execute(
+            "SELECT t.tag, COUNT(*) AS c FROM tags t JOIN notes n ON n.id = t.note_id "
+            "WHERE n.status != 'merged' GROUP BY t.tag ORDER BY c DESC, t.tag LIMIT ?",
+            (config.STATS_TOP_TAGS,),
+        )
+    ]
+    # 近 12 个月（含当月，按 created_at 字符串前缀聚合——格式恒为 YYYY-MM-DD HH:MM:SS）
+    by_month = [
+        {"month": r["m"], "count": r["c"]}
+        for r in conn.execute(
+            f"SELECT substr(created_at, 1, 7) AS m, COUNT(*) AS c FROM notes WHERE {scope} "
+            "GROUP BY m ORDER BY m DESC LIMIT 12"
+        )
+    ]
+    by_month.reverse()
+    return {"total": total, "by_category": by_category, "top_tags": top_tags, "by_month": by_month}
+
+
+@router.post("/api/weekly")
+def weekly_summary_api(conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """本周总结（§5，M3 拍板）：LLM 基于近 7 天笔记生成中文周报；失败降级纯统计文本。"""
+    rows = conn.execute(
+        "SELECT * FROM notes WHERE status != 'merged' "
+        "AND created_at >= datetime('now', 'localtime', '-7 days') ORDER BY created_at"
+    ).fetchall()
+    notes_list = [db.note_to_dict(r, [t["tag"] for t in conn.execute(
+        "SELECT tag FROM tags WHERE note_id = ? ORDER BY tag", (r["id"],))]) for r in rows]
+    note_count = len(notes_list)
+    try:
+        summary = llm.weekly_summary(notes_list)
+        return {"summary": summary, "note_count": note_count, "degraded": False}
+    except llm.LLMError as e:
+        logger.warning("每周总结生成失败，降级纯统计: %s", e)
+        cat_lines = "、".join(f"{c['category']} {c['count']} 条" for c in stats(conn, _auth=None)["by_category"])
+        summary = f"本周共记录 {note_count} 条笔记" + (f"（{cat_lines}）" if cat_lines else "") + "。"
+        return {"summary": summary, "note_count": note_count, "degraded": True}
+
+
+# ---------------------------------------------------------------------------
 # 问答端点（设计文档 §7：单轮无状态；向量+FTS+RRF+材料层兜底 + LLM 作答带引用）
 # ---------------------------------------------------------------------------
 
@@ -792,6 +848,13 @@ def notes_page(
          "cur_category": category, "cur_kind": kind, "cur_q": q or "",
          "active": "notes"},
     )
+
+
+@router.get("/stats", response_class=HTMLResponse)
+def stats_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLResponse:
+    """统计页（§8：分类分布 + 标签 + 时间分布 + 每周总结入口）。"""
+    data = stats(conn, _auth=None)
+    return render(request, "stats.html", {**data, "active": "stats"})
 
 
 @router.get("/notes/{note_id}", response_class=HTMLResponse)

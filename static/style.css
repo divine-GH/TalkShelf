@@ -257,3 +257,26 @@ textarea:focus, input:focus { outline: 2px solid var(--primary); outline-offset:
 }
 .conv-details summary { cursor: pointer; color: #333; font-size: 0.92rem; }
 .conv-details .messages { max-height: 50vh; overflow-y: auto; padding-top: 8px; }
+
+/* ---- 统计页（M3） ---- */
+.stat-list { list-style: none; margin: 0; padding: 0; }
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 0.9rem;
+}
+.stat-label { flex: 0 0 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #333; }
+.stat-bar { flex: 1; background: #eef1f5; border-radius: 999px; height: 14px; overflow: hidden; }
+.stat-fill { display: block; height: 100%; background: var(--primary); border-radius: 999px; min-width: 2px; }
+.stat-fill-tag { background: #b25e00; }
+.stat-fill-month { background: #2ea06f; }
+.stat-count { flex: 0 0 32px; text-align: right; color: var(--muted); font-size: 0.85rem; }
+.weekly-text {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-top: 10px;
+}
