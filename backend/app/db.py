@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS notes (
     done_at     TEXT,
     status      TEXT DEFAULT 'pending',
     merged_into INTEGER,
+    duplicate_of INTEGER,           -- 查重判定结果：疑似重复的目标笔记 id（M3 起落库，§6.2/§24）
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     processed_at TEXT
 );
@@ -108,15 +109,27 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection | None = None) -> None:
-    """建表（幂等）。测试/启动时调用。"""
+    """建表（幂等）+ 旧库增量迁移。测试/启动时调用。"""
     own = conn is None
     conn = conn or connect()
     try:
         conn.executescript(SCHEMA_SQL)
+        _migrate(conn)
         conn.commit()
     finally:
         if own:
             conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """旧库增量迁移（CREATE TABLE IF NOT EXISTS 不会给已有表加列）。
+
+    M3（§24）：notes 加 duplicate_of 列（查重判定目标落库，供详情页「疑似重复于 #id」与合并）。
+    新增列必须走这里，否则老库（如 data/note-brain.db）不会带出新列。
+    """
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(notes)")}
+    if "duplicate_of" not in cols:
+        conn.execute("ALTER TABLE notes ADD COLUMN duplicate_of INTEGER")
 
 
 # ---------------------------------------------------------------------------

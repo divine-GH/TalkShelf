@@ -132,6 +132,7 @@ class ReprocessQueue:
             # 3. FTS 同步（幂等；落库事务已同步过，这里防御性再同步）
             db.fts_sync(conn, note_id)
             # 4. 查重（仅新笔记一次；失败只记日志，不反噬入库，§21.2 #5）
+            #    命中时落库 duplicate_of（§24：供详情页「疑似重复于 #id」提示与合并交互）
             if run_dedup:
                 dup = None
                 try:
@@ -139,7 +140,10 @@ class ReprocessQueue:
                 except llm.LLMError as e:
                     logger.warning("笔记 #%s 查重失败（不反噬，保持原状态）：%s", note_id, e)
                 if dup and dup != note_id:
-                    conn.execute("UPDATE notes SET status='duplicate' WHERE id = ?", (note_id,))
+                    conn.execute(
+                        "UPDATE notes SET status='duplicate', duplicate_of=? WHERE id = ?",
+                        (dup, note_id),
+                    )
                 elif note["status"] == "pending":
                     conn.execute("UPDATE notes SET status='processed' WHERE id = ?", (note_id,))
             elif note["status"] == "pending":

@@ -174,3 +174,99 @@ def latest_organized(msgs: list[sqlite3.Row]) -> dict | None:
             except Exception:  # noqa: BLE001 —— 非整理 JSON 的回复（追问）跳过
                 return None
     return None
+
+
+# ---------------------------------------------------------------------------
+# M3：详情页操作（合并/忽略/更新/重新整理）——设计文档 §6.2 / §5 / §8
+# 与 confirm_conversation 相同约定：不自行 commit，由 API 层开事务；FTS 同事务维护。
+# ---------------------------------------------------------------------------
+
+# PUT 允许更新的字段白名单（§5：任意字段；status/created_at 等系统字段不可改）
+UPDATABLE_FIELDS = {
+    "raw", "title", "category", "summary", "content",
+    "importance", "kind", "source_url", "done_at",
+}
+
+
+def update_note(conn: sqlite3.Connection, note_id: int, fields: dict) -> dict:
+    """PUT 更新任意字段（§5）+ tags 重建 + FTS 同步（同事务）。
+
+    校验调用方已完成（category 在体系内、importance 1..3、kind 合法等）；
+    embedding 重算 / 重新查重由 API 层删向量 + 提交队列完成（§5 重整理管线）。
+    """
+    if "raw" in fields and not str(fields.get("raw") or "").strip():
+        raise ValueError("raw 不能为空")
+    if "tags" in fields:
+        tags = fields.pop("tags")
+        if not isinstance(tags, list) or not all(isinstance(t, str) and t.strip() for t in tags):
+            raise ValueError("tags 须为非空字符串列表")
+        conn.execute("DELETE FROM tags WHERE note_id = ?", (note_id,))
+        conn.executemany(
+            "INSERT INTO tags(note_id, tag) VALUES (?, ?)",
+            [(note_id, t.strip()) for t in tags],
+        )
+    if fields:
+        pairs = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE notes SET {pairs} WHERE id = ?", (*fields.values(), note_id))
+    db.fts_sync(conn, note_id)
+    return db.fetch_note(conn, note_id)
+
+
+def merge_note(conn: sqlite3.Connection, note_id: int, target_id: int) -> dict:
+    """查重「合并」（§6.2）：新笔记 raw 追加进旧笔记 → 软删除新笔记。
+
+    - 旧笔记：raw 追加（保留用户原话）、FTS 重建；embedding 重算 / 查重由 API 层删向量 + 提交队列；
+    - 新笔记：置 status='merged' + merged_into=target_id（审计痕迹，不物理删行）；
+      ⚠️ 同一事务内必须删 notes_fts 行与 embeddings 行——merged 出索引（§6.2 检查点，
+      查询侧 status 过滤只是表象，索引侧不清理则检索仍会命中）。
+    """
+    target = db.fetch_note(conn, target_id)
+    if not target or target["status"] == "merged":
+        raise KeyError(f"合并目标笔记不存在或已合并: {target_id}")
+    note = db.fetch_note(conn, note_id)
+    if not note or note["status"] == "merged":
+        raise KeyError(f"被合并笔记不存在或已合并: {note_id}")
+    if note_id == target_id:
+        raise ValueError("不能合并到自身")
+    new_raw = (target["raw"] + "\n" + note["raw"]).strip()
+    conn.execute("UPDATE notes SET raw = ? WHERE id = ?", (new_raw, target_id))
+    db.fts_sync(conn, target_id)
+    conn.execute("DELETE FROM embeddings WHERE note_id = ?", (target_id,))  # raw 变了必须重算
+    conn.execute("DELETE FROM embeddings WHERE note_id = ?", (note_id,))
+    conn.execute(
+        "UPDATE notes SET status='merged', merged_into=? WHERE id = ?", (target_id, note_id)
+    )
+    db.fts_delete(conn, note_id)  # merged 出索引（§6.2 检查点）
+    return db.fetch_note(conn, target_id)
+
+
+def ignore_duplicate(conn: sqlite3.Connection, note_id: int) -> dict:
+    """查重「忽略」（§6.2）：duplicate → processed，清 duplicate_of（用户判定不重复）。"""
+    conn.execute(
+        "UPDATE notes SET status='processed', duplicate_of=NULL WHERE id = ?", (note_id,)
+    )
+    return db.fetch_note(conn, note_id)
+
+
+def reprocess_note(conn: sqlite3.Connection, note_id: int) -> dict:
+    """手动重新整理（§5 reprocess）：清空元数据 + 置 pending + 删向量。
+
+    队列补做管线见 §14 第 6 条（结构化 → embedding → 查重 → FTS）；
+    仅 merged 笔记拒绝（已软删除，出索引）。
+    """
+    note = db.fetch_note(conn, note_id)
+    if not note:
+        raise KeyError(f"笔记不存在: {note_id}")
+    if note["status"] == "merged":
+        raise ConflictError("已合并的笔记不可重新整理")
+    conn.execute(
+        """UPDATE notes SET title=NULL, category=NULL, summary=NULL, content=NULL,
+                  importance=2, source_url=NULL, duplicate_of=NULL, status='pending',
+                  processed_at=NULL WHERE id = ?""",
+        (note_id,),
+    )
+    conn.execute("DELETE FROM tags WHERE note_id = ?", (note_id,))
+    conn.execute("DELETE FROM entities WHERE note_id = ?", (note_id,))
+    conn.execute("DELETE FROM embeddings WHERE note_id = ?", (note_id,))
+    db.fts_sync(conn, note_id)
+    return db.fetch_note(conn, note_id)
