@@ -38,7 +38,7 @@
   {% if recent %}
   <ul class="note-list">
     {% for n in recent %}
-    <li class="note-item">
+    <li class="note-item" data-id="{{ n.id }}">
       <div class="note-head">
         {% if n.quick and n.status == 'pending' %}
         <span class="badge badge-warn">判断中…</span>
@@ -114,5 +114,30 @@
       if (resp.ok) location.reload();
     });
   });
+
+  // 快速记录自动更新（§32）：页面有「判断中」笔记时轮询，
+  // 全部处理完成（含失败）后自动刷新页面，免手动刷新
+  {% if recent | selectattr('quick') | selectattr('status', 'equalto', 'pending') | list %}
+  (function () {
+    const pendingQuickIds = [];
+    document.querySelectorAll('.note-item').forEach(function (li) {
+      const firstBadge = li.querySelector('.badge');
+      if (firstBadge && firstBadge.textContent.trim() === '判断中…') {
+        pendingQuickIds.push(li.dataset.id);
+      }
+    });
+    if (!pendingQuickIds.length) return;
+    const timer = setInterval(async function () {
+      try {
+        const resp = await fetch('/api/notes?page=1');
+        const data = await resp.json();
+        const stillPending = data.items.filter(function (n) {
+          return pendingQuickIds.indexOf(String(n.id)) !== -1;
+        }).some(function (n) { return n.quick && n.status === 'pending'; });
+        if (!stillPending) { clearInterval(timer); location.reload(); }
+      } catch (ex) { /* 网络抖动忽略，下轮重试 */ }
+    }, 2000);
+  })();
+  {% endif %}
 </script>
 {% endblock %}

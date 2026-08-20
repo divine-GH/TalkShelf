@@ -149,3 +149,21 @@ def test_quick_note_badge_on_pages(client, llm_ok, monkeypatch, db_path):
     wait_for(lambda: note_status(db_path, note_id)[0] == "processed", desc="整理完成")
     assert "判断中" not in client.get("/notes").text  # 整理完成徽标消失
     assert "判断中" not in client.get(f"/notes/{note_id}").text
+
+
+def test_index_page_auto_refresh_script(client, llm_ok, monkeypatch, db_path):
+    """首页含快速记录自动刷新逻辑：判断中笔记带 data-id 且渲染轮询脚本（§32 免手动刷新）。"""
+
+    def slow_chat_json(messages, validate=None, **kwargs):
+        time.sleep(0.5)
+        return dict(llm_ok)
+
+    monkeypatch.setattr(llm, "chat_json", slow_chat_json)
+    note_id = quick_note(client, "自动刷新测试内容")
+    page = client.get("/").text
+    assert f'data-id="{note_id}"' in page, "判断中笔记列表项带 data-id 供轮询判断"
+    assert "pendingQuickIds" in page, "首页渲染快速记录自动刷新轮询脚本"
+    # 无判断中笔记时（处理完成或没有快速记录）不渲染轮询逻辑
+    wait_for(lambda: note_status(db_path, note_id)[0] == "processed", desc="整理完成")
+    page = client.get("/").text
+    assert "pendingQuickIds" not in page, "处理完成后不再渲染自动刷新脚本"
