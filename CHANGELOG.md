@@ -10,6 +10,18 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.6.1] - 2026-08-20
+
+### Changed
+
+- **联网搜索模型可选（设置页）**：模型配置「联网搜索模型」子块的模型字段从只读改为可选——
+  下拉列表来自 DeepSeek 模型接口（失败回落内置列表），附「自定义模型…」手动输入（确认/取消，
+  回车确认）；当前生效模型不在列表时标「（默认值）/（当前值）」（默认值取 .env `SEARCH_MODEL`，
+  渲染上下文新增 `search_model_default`）。**提供商仍固定 DeepSeek**（原生 web_search），
+  下拉保持禁用仅一项。
+- 设置表单恢复提交 `search_model`（PUT /api/settings 白名单本就含该键）；「已修改但未保存」
+  标注覆盖该行；可选模型交互抽成 `initModelSelect` 工厂，对话/整理与联网搜索共用。
+
 ## [0.6.0] - 2026-08-20
 
 ### Changed
