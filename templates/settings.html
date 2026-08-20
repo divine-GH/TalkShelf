@@ -45,14 +45,16 @@
           {% endfor %}
         </select>
       </label>
-      <label class="set-row">
+      <div class="set-row">
         <span class="set-label">可选模型
-          <span class="set-hint">列表来自该提供商的模型接口（需 API Key）；不在列表内也可手动输入</span>
+          <span class="set-hint">列表来自该提供商的模型接口（需 API Key）；也可选「自定义模型…」手动输入</span>
         </span>
-        <input type="text" id="llm-model" list="llm-model-options" value="{{ s.llm_model }}"
-               maxlength="100" autocomplete="off">
-      </label>
-      <datalist id="llm-model-options"></datalist>
+        <select id="llm-model">
+          <option value="{{ s.llm_model }}" selected>{{ s.llm_model }}</option>
+          <option value="__custom__">自定义模型…</option>
+        </select>
+        <input type="text" id="llm-model-custom" maxlength="100" autocomplete="off" placeholder="输入模型名后回车" hidden>
+      </div>
       <p class="hint" id="model-list-msg"></p>
     </div>
 
@@ -178,10 +180,40 @@
     msgBox.hidden = false;
   }
 
-  // 可选模型列表：按当前提供商拉取（GET /api/settings/models），失败回落内置列表
-  var modelInput = document.getElementById('llm-model');
-  var modelOptions = document.getElementById('llm-model-options');
+  // 可选模型：下拉框按当前提供商拉取（GET /api/settings/models），失败回落内置列表；
+  // 下拉含「自定义模型…」入口（选择后切换为文本输入，回车确认回到下拉并选中该值）
+  var modelSel = document.getElementById('llm-model');
+  var modelCustom = document.getElementById('llm-model-custom');
   var modelListMsg = document.getElementById('model-list-msg');
+
+  function currentModel() {
+    return modelCustom.hidden ? modelSel.value : modelCustom.value.trim();
+  }
+
+  function fillModelOptions(models) {
+    var current = modelSel.value;
+    modelSel.innerHTML = '';
+    if (current && models.indexOf(current) === -1) {
+      var cur = document.createElement('option');
+      cur.value = current;
+      cur.textContent = current + '（当前值）';
+      modelSel.appendChild(cur);
+    }
+    models.forEach(function (m) {
+      var opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      modelSel.appendChild(opt);
+    });
+    var custom = document.createElement('option');
+    custom.value = '__custom__';
+    custom.textContent = '自定义模型…';
+    modelSel.appendChild(custom);
+    modelSel.value = current;
+    // 自定义输入中的值未确认时被下拉选中覆盖：保持不回退（若用户正在输入则不打断）
+    if (!modelCustom.hidden) modelSel.value = '__custom__';
+  }
+
   function loadModels(provider) {
     modelListMsg.textContent = '加载模型列表…';
     fetch('/api/settings/models?provider=' + encodeURIComponent(provider))
@@ -192,20 +224,38 @@
         });
       })
       .then(function (data) {
-        modelOptions.innerHTML = '';
-        data.models.forEach(function (m) {
-          var opt = document.createElement('option');
-          opt.value = m;
-          modelOptions.appendChild(opt);
-        });
+        fillModelOptions(data.models);
         modelListMsg.textContent = data.source === 'api'
-          ? ('已从 ' + data.provider_name + ' 拉取 ' + data.models.length + ' 个模型（未列出的模型可直接输入）')
-          : ('模型列表获取失败：' + data.detail + '（显示内置列表，未列出的模型可直接输入）');
+          ? ('已从 ' + data.provider_name + ' 拉取 ' + data.models.length + ' 个模型')
+          : ('模型列表获取失败：' + data.detail + '（显示内置列表）');
       })
       .catch(function (ex) {
-        modelListMsg.textContent = '模型列表获取失败：' + ex.message + '（可手动输入模型名）';
+        modelListMsg.textContent = '模型列表获取失败：' + ex.message + '（可在「自定义模型…」手动输入）';
       });
   }
+
+  // 「自定义模型…」：切换到文本输入；回车/失焦确认后回到下拉并选中新值
+  modelSel.addEventListener('change', function () {
+    if (modelSel.value !== '__custom__') return;
+    modelCustom.value = '';
+    modelCustom.hidden = false;
+    modelSel.hidden = true;
+    modelCustom.focus();
+  });
+  modelCustom.addEventListener('change', function () {
+    var v = modelCustom.value.trim();
+    if (!v) { modelSel.value = modelSel.options.length ? modelSel.options[0].value : ''; }
+    else {
+      var opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = v;
+      modelSel.insertBefore(opt, modelSel.firstChild);
+      modelSel.value = v;
+    }
+    modelCustom.hidden = true;
+    modelSel.hidden = false;
+  });
+
   document.getElementById('llm-provider').addEventListener('change', function (e) {
     loadModels(e.target.value);
   });
@@ -214,11 +264,16 @@
   // 保存设置（通用 + 模型 + 检索）
   document.getElementById('settings-form').addEventListener('submit', async function (e) {
     e.preventDefault();
+    var llmModel = currentModel();
+    if (!llmModel || llmModel === '__custom__') {
+      showMsg('请选择或输入对话/整理模型。', true);
+      return;
+    }
     var body = {
       weekly_llm: document.getElementById('weekly-llm').checked,
       default_category: document.getElementById('default-category').value,
       llm_provider: document.getElementById('llm-provider').value,
-      llm_model: modelInput.value.trim(),
+      llm_model: llmModel,
       embed_model: document.getElementById('embed-model').value.trim(),
       vector_top_k: parseInt(document.getElementById('vector-top-k').value, 10),
       fts_top_k: parseInt(document.getElementById('fts-top-k').value, 10),

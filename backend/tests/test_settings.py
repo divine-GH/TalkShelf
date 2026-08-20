@@ -31,8 +31,8 @@ def test_settings_page_html(client):
         "联网搜索模型",
         'id="llm-provider"',
         'id="llm-model"',
-        'list="llm-model-options"',
-        'id="llm-model-options"',
+        'id="llm-model-custom"',
+        "__custom__",  # 可选模型下拉含「自定义模型…」入口
         'id="embed-model"',
         'id="search-provider"',
         'id="search-model"',
