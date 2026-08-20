@@ -1,4 +1,4 @@
-# note-brain 一键启动脚本
+﻿# note-brain 一键启动脚本
 # 用法：右键「使用 PowerShell 运行」，或 `powershell -File start.ps1`
 # 自动处理：Ollama 未运行 → 启动；Ollama 运行但 bge-m3 不可见（重启后 app 自启的环境坑）→ 重启 serve
 # 停止：在窗口中按 Ctrl+C
