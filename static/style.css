@@ -130,6 +130,7 @@ textarea, input[type="search"] {
 textarea:focus, input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
 
 .error { color: var(--danger); font-size: 0.9rem; margin: 8px 0 0; }
+.ok { color: var(--primary); font-size: 0.9rem; margin: 8px 0 0; }
 .empty { color: var(--muted); }
 
 /* ---- 设置页（§28/§29） ---- */
@@ -194,6 +195,8 @@ details.section[open] > summary { margin-bottom: 10px; }
 /* ---- 首页记录入口 ---- */
 .record-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .record-form textarea { font-size: 1.05rem; }
+.record-actions { display: flex; gap: 10px; }
+.record-actions .btn { flex: 1; }
 
 /* ---- 草稿列表 ---- */
 .draft-list, .note-list { list-style: none; margin: 0; padding: 0; }
@@ -290,6 +293,8 @@ details.section[open] > summary { margin-bottom: 10px; }
 }
 .msg-user .msg-text { background: var(--user-bubble); border-bottom-right-radius: 4px; }
 .msg-assistant .msg-text { background: var(--assistant-bubble); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.msg-thinking .msg-text { color: var(--muted); font-style: italic; animation: thinking-pulse 1.2s ease-in-out infinite; }
+@keyframes thinking-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 .msg-material { max-width: 100%; }
 .msg-material pre {
   white-space: pre-wrap;

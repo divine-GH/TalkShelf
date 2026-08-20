@@ -4,12 +4,16 @@
 {% block content %}
 <section class="record-entry">
   <h1>记点什么</h1>
-  <p class="hint">像跟助理说话一样：口语片段、链接 + 描述都行。AI 先帮你整理，你拍板后才入库。</p>
+  <p class="hint">像跟助理说话一样：口语片段、链接 + 描述都行。AI 先帮你整理，你拍板后才入库；<br>或点「快速记录」直接入库，AI 自动判断是收藏还是兴趣。</p>
   <form id="record-form" class="record-form">
     <textarea id="record-input" rows="3" placeholder="例如：今天发现 nginx client_max_body_size 默认 1M，上传大文件被拒，帮我记下 https://example.com/…" autofocus></textarea>
-    <button type="submit" class="btn btn-primary btn-lg">开始记录</button>
+    <div class="record-actions">
+      <button type="submit" class="btn btn-primary btn-lg" data-mode="chat">开始记录</button>
+      <button type="submit" class="btn btn-lg" data-mode="quick">⚡ 快速记录</button>
+    </div>
   </form>
   <p id="record-error" class="error" hidden></p>
+  <p id="record-ok" class="ok" hidden></p>
 </section>
 
 {% if drafts %}
@@ -36,7 +40,11 @@
     {% for n in recent %}
     <li class="note-item">
       <div class="note-head">
+        {% if n.quick and n.status == 'pending' %}
+        <span class="badge badge-warn">判断中…</span>
+        {% else %}
         <span class="badge kind-{{ n.kind }}">{{ '兴趣' if n.kind == 'interest' else '收藏' }}</span>
+        {% endif %}
         {% if n.category %}<span class="badge">{{ n.category }}</span>{% endif %}
         {% if n.status == 'duplicate' %}<span class="badge badge-warn">疑似重复</span>{% endif %}
       </div>
@@ -57,26 +65,45 @@
 <script>
   document.getElementById('record-form').addEventListener('submit', async function (e) {
     e.preventDefault();
+    const submitter = e.submitter || this.querySelector('button[data-mode="chat"]');
+    const mode = submitter ? submitter.dataset.mode : 'chat';
     const input = document.getElementById('record-input');
     const err = document.getElementById('record-error');
+    const ok = document.getElementById('record-ok');
     const msg = input.value.trim();
     if (!msg) return;
     err.hidden = true;
-    const btn = this.querySelector('button');
-    btn.disabled = true;
+    ok.hidden = true;
+    submitter.disabled = true;
     try {
-      const resp = await fetch('/api/conversations', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({message: msg}),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
-      location.href = '/conversations/' + data.conversation_id;
+      if (mode === 'quick') {
+        // 快速记录（§32）：原文直接入库，AI 后台判断兴趣/收藏；留在首页
+        const resp = await fetch('/api/quick-notes', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: msg}),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+        ok.textContent = '已记录，AI 正在判断兴趣/收藏并整理…';
+        ok.hidden = false;
+        input.value = '';
+        setTimeout(() => location.reload(), 800);
+      } else {
+        // 对话式记录（§32）：立即进入对话页，LLM 回复异步生成（页内显示思考中）
+        const resp = await fetch('/api/conversations', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: msg}),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+        location.href = '/conversations/' + data.conversation_id;
+      }
     } catch (ex) {
       err.textContent = '发起记录失败：' + ex.message;
       err.hidden = false;
-      btn.disabled = false;
+      submitter.disabled = false;
     }
   });
 

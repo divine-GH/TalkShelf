@@ -31,9 +31,13 @@
   {% for n in data['items'] %}
   <li class="note-item" id="note-{{ n.id }}">
     <div class="note-head">
+      {% if n.quick and n.status == 'pending' %}
+      <span class="badge badge-warn">判断中…</span>
+      {% else %}
       <span class="badge kind-{{ n.kind }}">{{ '兴趣' if n.kind == 'interest' else '收藏' }}</span>
+      {% endif %}
       {% if n.category %}<span class="badge">{{ n.category }}</span>{% endif %}
-      {% if n.status == 'pending' %}<span class="badge badge-warn">整理中</span>{% endif %}
+      {% if n.status == 'pending' and not n.quick %}<span class="badge badge-warn">整理中</span>{% endif %}
       {% if n.status == 'failed' %}<span class="badge badge-warn">整理失败</span>{% endif %}
       {% if n.status == 'duplicate' %}<span class="badge badge-warn">疑似重复</span>{% endif %}
     </div>

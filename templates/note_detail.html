@@ -21,10 +21,16 @@
   {% endif %}
 
   {% if note.status == 'failed' %}<div class="banner banner-warn">整理失败：可点下方「重新整理」重试。</div>{% endif %}
-  {% if note.status == 'pending' %}<div class="banner banner-warn">整理中（直存/重新整理中）…</div>{% endif %}
+  {% if note.status == 'pending' %}
+  <div class="banner banner-warn">{% if note.quick %}快速记录处理中：AI 正在判断兴趣/收藏并整理，当前显示原文…{% else %}整理中（直存/重新整理中）…{% endif %}</div>
+  {% endif %}
 
   <div class="note-head">
+    {% if note.quick and note.status == 'pending' %}
+    <span class="badge badge-warn">判断中…</span>
+    {% else %}
     <span class="badge kind-{{ note.kind }}">{{ '兴趣' if note.kind == 'interest' else '收藏' }}</span>
+    {% endif %}
     {% if note.category %}<span class="badge">{{ note.category }}</span>{% endif %}
     <span class="note-meta">#{{ note.id }} · {{ note.created_at }}</span>
     {% if note.done_at %}<span class="badge">做过：{{ note.done_at }}</span>{% endif %}
