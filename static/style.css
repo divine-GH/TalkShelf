@@ -277,6 +277,8 @@ details.section[open] > summary { margin-bottom: 10px; }
   transition: transform 0.15s ease;
 }
 .note-item.open .history-question::after { transform: rotate(90deg); }
+/* 展开详情后隐藏 160 字截断预览，避免与完整答案重复显示（收起时恢复） */
+.note-item.open .note-summary { display: none; }
 .history-detail {
   margin-top: 8px;
   padding-top: 8px;
