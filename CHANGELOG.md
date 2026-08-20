@@ -37,6 +37,10 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 
 ### Fixed
 
+- **204 响应带 body 修复**：删检索记录/删笔记/放弃草稿三处 `JSONResponse(status_code=204, content=None)`
+  会发送 4 字节 `b"null"` body，违反 RFC 7230 §3.3.3（204 必须空 body），h11 报
+  `Too much data for declared Content-Length` 并记录 `Exception in ASGI application`——
+  统一改为 `Response(status_code=204)`（空 body，不写 Content-Length）。测试补断言 `resp.content == b""`。
 - **启动脚本乱码修复**：`start.ps1` 与 README 手动启动命令增加 `--no-use-colors`——Windows PowerShell 5.1 控制台不解析 ANSI 颜色码，会原样打印 `[32mINFO[0m` 之类的转义序列。
 
 ## [0.3.0] - 2026-08-20

@@ -56,6 +56,7 @@ def test_search_history_delete(client, llm_ok, monkeypatch):
 
     resp = client.delete(f"/api/search-history/{rid}")
     assert resp.status_code == 204
+    assert resp.content == b"", "204 禁止带 body（JSONResponse(204, None) 会发 b'null'，h11 报错）"
     assert [i["question"] for i in _history(client)] == ["问题一"]
 
     resp = client.delete(f"/api/search-history/{rid}")

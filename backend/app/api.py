@@ -15,7 +15,7 @@ from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from . import auth, config, db, fetch, llm, notes, retrieval, web_search
@@ -309,13 +309,15 @@ def confirm_conversation(
 
 
 @router.delete("/api/conversations/{conv_id}")
-def discard_conversation(conv_id: int, conn: ConnDep, _auth: ApiAuthDep) -> JSONResponse:
+def discard_conversation(conv_id: int, conn: ConnDep, _auth: ApiAuthDep) -> Response:
     conv = _fetch_conversation(conn, conv_id)
     if conv["status"] != "draft":
         raise HTTPException(status_code=409, detail="仅草稿可放弃")
     conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
     conn.commit()
-    return JSONResponse(status_code=204, content=None)
+    # 204 禁止带 body：JSONResponse(204, content=None) 会发 4 字节 "null"，
+    # h11 按 RFC 7230 §3.3.3 强制 204 空 body → LocalProtocolError（删记录/删笔记同坑）
+    return Response(status_code=204)
 
 
 @router.get("/api/conversations")
@@ -536,7 +538,7 @@ def note_convert(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
 
 
 @router.delete("/api/notes/{note_id}")
-def delete_note(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> JSONResponse:
+def delete_note(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> Response:
     """删除笔记（回顾页「放弃/删除」；外键级联清理 tags/entities/embeddings/对话/材料）。"""
     _fetch_note_or_404(conn, note_id)
     # notes_fts / materials_fts 是虚拟表（无外键），必须手动清理同一事务内（§4 FTS 同步约定）
@@ -547,7 +549,7 @@ def delete_note(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> JSONResponse:
     )
     conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
     conn.commit()
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -824,12 +826,12 @@ def search_history_list(conn: ConnDep, _auth: ApiAuthDep) -> dict:
 
 
 @router.delete("/api/search-history/{record_id}")
-def search_history_delete(record_id: int, conn: ConnDep, _auth: ApiAuthDep) -> JSONResponse:
+def search_history_delete(record_id: int, conn: ConnDep, _auth: ApiAuthDep) -> Response:
     """删除单条检索记录（不存在返回 404）。"""
     if not db.delete_search_history(conn, record_id):
         raise HTTPException(status_code=404, detail="检索记录不存在")
     conn.commit()
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
