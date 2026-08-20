@@ -60,6 +60,13 @@ cd backend
 
 LLM 与 embedding 全部 mock（`tests/conftest.py`：固定整理 JSON + 确定性伪向量），不触网、不花钱。
 
+## 版本与更新记录
+
+- 语义化版本：当前版本见 `backend/app/config.py` 的 `APP_VERSION`（`0.3.0`，与 git tag `v0.3.0` 对应）。
+- `CHANGELOG.md`：Keep a Changelog 格式，每版本一节（`## [0.3.0] - 2026-08-20`），按版本/日期检索
+  `grep "\[0.3.0\]" CHANGELOG.md`；发版 = bump 版本号 → CHANGELOG 追加 → `git tag -a vX.Y.Z`。
+- 版本探活：`GET /api/version`（免登录）→ `{"name": "note-brain", "version": "0.3.0"}`，部署后确认线上版本用。
+
 ## 目录结构
 
 ```
