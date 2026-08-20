@@ -89,6 +89,16 @@ def emb_ok(monkeypatch):
     monkeypatch.setattr(embedding, "embed_texts", lambda texts: [pseudo(t) for t in texts])
 
 
+@pytest.fixture(autouse=True)
+def emb_default_on(monkeypatch):
+    """embedding 总开关默认开（§35.4 生产默认关，测试统一走全功能路径）。
+
+    生产默认 EMBEDDING_ENABLED=0（面向分发）；测试里若默认关，向量查重/补向量/
+    vector_ok=True 等既有用例会大面积失效。关闭路径由专门测试显式 PUT False 覆盖。
+    """
+    monkeypatch.setattr(config, "EMBEDDING_ENABLED", True)
+
+
 @pytest.fixture
 def llm_ok(monkeypatch):
     """LLM 正常：对话输出固定整理 JSON；force_json 整理与查重走 chat_json（按 system prompt 区分）。"""

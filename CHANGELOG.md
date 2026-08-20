@@ -10,6 +10,16 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.7.5] - 2026-08-20
+
+### Changed
+
+- **本地 Embedding 出厂默认改为关（§35.4）**：`config.py` 内建默认 `EMBEDDING_ENABLED=0`、
+  `.env.example` 同步 `EMBEDDING_ENABLED=0`——面向分发：新机器（无 .env 或照抄模板）默认
+  不跑向量化，没装 Ollama 免空转/免反复重试；装了 Ollama 的机器设 `1` 或在设置页打开即可。
+  已保存过设置的机器不受影响（settings 表覆盖 .env，§28）。测试约定同步：conftest 默认把
+  开关设为开（走全功能路径），关闭路径由专门测试显式关闭覆盖。
+
 ## [0.7.4] - 2026-08-20
 
 ### Added
