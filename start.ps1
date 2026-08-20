@@ -38,7 +38,8 @@ Write-Host '停止服务: 在此窗口按 Ctrl+C'
 Write-Host ''
 Push-Location (Join-Path $root 'backend')
 try {
-    & $python -m uvicorn app.main:app --host $hostAddr --port 8000 --workers 1
+    # --no-use-colors：Windows PowerShell 5.1 控制台不解析 ANSI 颜色码，会原样打印 [32mINFO[0m 之类的乱码，故禁用
+    & $python -m uvicorn app.main:app --host $hostAddr --port 8000 --workers 1 --no-use-colors
 } finally {
     Pop-Location
 }

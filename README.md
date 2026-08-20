@@ -44,8 +44,10 @@
 
 ```powershell
 cd backend
-& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-use-colors
 ```
+
+`--no-use-colors`：Windows PowerShell 5.1 控制台不解析 ANSI 颜色码（会原样打印 `[32mINFO[0m` 乱码），故统一禁用颜色。
 
 ⚠️ `--workers 1` 是硬性要求：异步补做队列在进程内存，多 worker 会重复处理 pending（设计文档 §5）。
 数据文件：`note-brain/data/note-brain.db`（自动创建，不入库；备份 = 复制该文件）。

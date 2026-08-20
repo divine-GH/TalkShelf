@@ -19,6 +19,10 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 - **开发工具链**：引入 ruff（lint `ruff check` + format `ruff format`，配置见 `ruff.toml`，默认规则集 + line-length 100）；
   测试/开发依赖拆分到 `requirements-dev.txt`（pytest 移出运行时依赖）。
 
+### Fixed
+
+- **启动脚本乱码修复**：`start.ps1` 与 README 手动启动命令增加 `--no-use-colors`——Windows PowerShell 5.1 控制台不解析 ANSI 颜色码，会原样打印 `[32mINFO[0m` 之类的转义序列。
+
 ## [0.3.0] - 2026-08-20
 
 ### Added
