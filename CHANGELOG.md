@@ -10,6 +10,18 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.7.4] - 2026-08-20
+
+### Added
+
+- **本地 Embedding 总开关（设置页，§35）**：没装 Ollama 的分发环境可关闭「启用本地
+  Embedding（向量检索）」。关闭后：补做队列不再算向量/反复重试、启动扫描不再扫缺向量老笔记、
+  查重直接走 FTS 近似版、问答退关键词检索（`vector_ok=False`，提示语更新为「未运行或在设置中
+  已关闭」）；已有向量保留，重新打开即恢复语义检索。出厂默认开（.env `EMBEDDING_ENABLED=1`
+  可改默认值，设置页修改立即生效、重启不丢）。
+- **start.ps1 适配无 Ollama 机器**：未检测到 Ollama 时跳过拉起步骤（原实现会尝试启动不存在的
+  程序并等待 6 秒），提示安装 Ollama 或到设置页关闭开关。
+
 ## [0.7.3] - 2026-08-20
 
 ### Changed

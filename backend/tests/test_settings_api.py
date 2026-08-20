@@ -44,6 +44,7 @@ def _has_embedding(path, note_id) -> bool:
 def test_get_settings_defaults(client):
     data = client.get("/api/settings").json()
     assert data["weekly_llm"] is True
+    assert data["embedding_enabled"] is True
     assert data["default_category"] == ""
     assert data["llm_provider"] == config.LLM_PROVIDER
     assert data["llm_model"] == config.LLM_MODEL
@@ -99,12 +100,23 @@ def test_put_settings_validation(client):
         {"vector_top_k": "abc"},
         {"vector_min_sim": 2},
         {"weekly_llm": "yes"},
+        {"embedding_enabled": "yes"},  # 开关只收布尔
         {"llm_model": ""},
         {"llm_model": "x" * 101},
     ]
     for body in cases:
         resp = client.put("/api/settings", json=body)
         assert resp.status_code == 422, f"应 422: {body}"
+
+
+def test_embedding_enabled_toggle(client):
+    """embedding 总开关（§35）：PUT False → 生效值 False；value=None 恢复默认 True。"""
+    resp = client.put("/api/settings", json={"embedding_enabled": False})
+    assert resp.status_code == 200
+    assert resp.json()["embedding_enabled"] is False
+    resp = client.put("/api/settings", json={"embedding_enabled": None})
+    assert resp.status_code == 200
+    assert resp.json()["embedding_enabled"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -101,6 +101,29 @@ def test_ask_fts_only_when_ollama_down(client, llm_ok, db_path, monkeypatch):
     assert data["sources"], "FTS 路仍能召回"
 
 
+def test_ask_fts_only_when_embedding_disabled(client, llm_ok, db_path, monkeypatch):
+    """设置页关闭 embedding（§35）→ 向量路整路跳过：不调 Ollama、vector_ok=False、FTS 仍可用。
+
+    embed_texts 被 monkeypatch 成"一调就炸"：关闭后若还调用，请求/队列会失败，本测试必挂。
+    """
+    from app import embedding
+
+    client.put("/api/settings", json={"embedding_enabled": False})
+    monkeypatch.setattr(
+        embedding,
+        "embed_texts",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("关闭后不应调用 embedding")),
+    )
+    _mk_note(client, db_path, "nginx client_max_body_size 默认 1M 上传大文件被拒 413")
+    _mk_client_with_answer(client, monkeypatch)
+
+    resp = client.post("/api/ask", json={"question": "nginx 上传限制"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["vector_ok"] is False, "关闭时 vector_ok 应如实上报 False"
+    assert data["sources"], "FTS 路仍能召回"
+
+
 def test_ask_weak_recall_flag(client, llm_ok, db_path, monkeypatch):
     """召回不足：Top-1 相似度 < 阈值 → weak_recall=True，prompt 明示（§7 兜底）。
 

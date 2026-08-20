@@ -11,7 +11,7 @@
 - **链接正文抓取**（服务端直抓 + 模型侧 web_fetch 工具）：SSRF 防护、20KB 截断、失败降级
 - **联网搜索**：DeepSeek 原生 web_search（意图词触发：查一下/搜一下/搜索…），结果注入对话标注来源
 - **直存降级**：DeepSeek 不可用时原文照常入库（pending），恢复后自动补整理（退避 5 次 → failed）
-- **Ollama embedding**（bge-m3）：向量化入库、启动扫描补算；Ollama 挂时检索自动降级 FTS-only、查重退 FTS 近似版
+- **Ollama embedding**（bge-m3）：向量化入库、启动扫描补算；Ollama 挂时检索自动降级 FTS-only、查重退 FTS 近似版；设置页可整体关闭「本地 Embedding」（没装 Ollama 的机器用，§35）
 - **查重**（向量版）：命中标 duplicate 并记录目标 id（duplicate_of），Web 端提示"疑似重复于 #id"
 - **Web 检索页**：向量 + FTS + RRF 融合 + 材料层兜底召回 → LLM 作答带引用（点击跳转原笔记）
 - **检索记录**：提问成功自动保存（问题 + 答案 + 时间），默认上限 50 条（`SEARCH_HISTORY_LIMIT` 可配），超出自动删除最早记录；点击历史问题再次提问，可单条删除
@@ -52,7 +52,7 @@ cd backend
 
 ⚠️ `--workers 1` 是硬性要求：异步补做队列在进程内存，多 worker 会重复处理 pending（设计文档 §5）。
 数据文件：`note-brain/data/note-brain.db`（自动创建，不入库；备份 = 复制该文件）。
-依赖服务：Ollama（`http://127.0.0.1:11434`，需 `bge-m3` 模型；挂了自动降级，不影响使用）。
+依赖服务：Ollama（`http://127.0.0.1:11434`，需 `bge-m3` 模型；挂了自动降级，不影响使用；没装可在设置页关闭「本地 Embedding」）。
 
 ## 测试
 

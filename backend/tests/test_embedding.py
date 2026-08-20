@@ -106,6 +106,68 @@ def test_dedup_falls_back_to_fts_when_no_embeddings(client, llm_ok, db_path, mon
     assert note_status(db_path, new_id)[0] == "duplicate"
 
 
+def test_dedup_uses_fts_when_embedding_disabled(client, llm_ok, db_path, monkeypatch):
+    """设置页关闭 embedding（§35）→ 查重直接走 FTS 近似版：不补向量、不碰向量召回。"""
+    from app import embedding, llm
+
+    client.put("/api/settings", json={"embedding_enabled": False})
+    # 向量路一碰就炸：关闭后 check_duplicate 若走向量召回，处理会失败、本测试必挂
+    monkeypatch.setattr(
+        embedding,
+        "vector_candidates",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("关闭后不应走向量查重")),
+    )
+
+    resp = client.post("/api/notes", json={"raw": "开关测试：sqlite WAL 模式", "kind": "note"})
+    old_id = resp.json()["note_id"]
+    wait_for(
+        lambda: note_status(db_path, old_id)[0] in ("processed", "duplicate"), desc="旧笔记处理完"
+    )
+    assert not _has_embedding(db_path, old_id), "关闭时不应补算向量"
+
+    monkeypatch.setattr(llm, "judge_duplicate", lambda new_summary, candidates: old_id)
+    resp = client.post("/api/notes", json={"raw": "sqlite WAL 模式细节", "kind": "note"})
+    new_id = resp.json()["note_id"]
+    wait_for(
+        lambda: note_status(db_path, new_id)[0] == "duplicate", desc="FTS 降级查重标 duplicate"
+    )
+    assert note_status(db_path, new_id)[0] == "duplicate"
+
+
+def test_startup_scan_skips_missing_vectors_when_disabled(client, llm_ok, db_path, monkeypatch):
+    """关闭 embedding 时启动扫描不补向量（§35）：缺向量老笔记不会反复空跑。"""
+    import sqlite3
+    import time
+
+    from app import embedding
+    from app.main import app
+    from fastapi.testclient import TestClient
+
+    # 先开着 embedding 造一条 processed 老笔记，再删掉向量模拟「缺向量老笔记」
+    resp = client.post("/api/notes", json={"raw": "启动扫描开关测试笔记", "kind": "note"})
+    note_id = resp.json()["note_id"]
+    wait_for(lambda: note_status(db_path, note_id)[0] == "processed", desc="处理完成")
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM embeddings WHERE note_id = ?", (note_id,))
+    conn.commit()
+    conn.close()
+
+    # 关闭 embedding 后重启：扫描不应再补向量（spy 一调就记）
+    client.put("/api/settings", json={"embedding_enabled": False})
+    calls = []
+    orig = embedding.embed_note
+
+    def spy(note):
+        calls.append(note)
+        return orig(note)
+
+    monkeypatch.setattr(embedding, "embed_note", spy)
+    client.close()
+    with TestClient(app):
+        time.sleep(0.3)  # 给 worker 空窗：若误提交会立即调 embed_note
+    assert calls == [], "关闭时启动扫描不应补向量"
+
+
 def test_embedding_failure_backoff_then_stays(client, llm_ok, db_path, monkeypatch):
     """embedding 持续失败：退避重试后不标 failed（区别于 LLM 失败 → failed），保持 pending（§14 第 8 条）。"""
     from app import config, embedding

@@ -23,6 +23,9 @@ KEY_LLM_PROVIDER = (
 )
 KEY_LLM_MODEL = "llm_model"  # 对话/整理模型名（随 llm_provider 的提供商 API 调用）
 KEY_EMBED_MODEL = "embed_model"  # Ollama embedding 模型名
+KEY_EMBEDDING_ENABLED = (
+    "embedding_enabled"  # "1"/"0"：本地 embedding 总开关（§35；关 = 向量化/向量检索全跳过）
+)
 KEY_SEARCH_MODEL = "search_model"  # 联网搜索模型名
 KEY_VECTOR_TOP_K = "vector_top_k"  # 向量召回 Top-K
 KEY_FTS_TOP_K = "fts_top_k"  # FTS 关键词召回 Top-K
@@ -103,6 +106,7 @@ def effective(conn: sqlite3.Connection) -> dict:
         "llm_provider": get_str(conn, KEY_LLM_PROVIDER, config.LLM_PROVIDER),
         "llm_model": get_str(conn, KEY_LLM_MODEL, config.LLM_MODEL),
         "embed_model": get_str(conn, KEY_EMBED_MODEL, config.EMBED_MODEL),
+        "embedding_enabled": get_bool(conn, KEY_EMBEDDING_ENABLED, config.EMBEDDING_ENABLED),
         "search_model": get_str(conn, KEY_SEARCH_MODEL, config.SEARCH_MODEL),
         "vector_top_k": get_int(conn, KEY_VECTOR_TOP_K, config.VECTOR_TOP_K),
         "fts_top_k": get_int(conn, KEY_FTS_TOP_K, config.FTS_TOP_K),

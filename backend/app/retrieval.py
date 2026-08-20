@@ -144,14 +144,22 @@ def _note_hits_to_sources(conn: sqlite3.Connection, note_ids: list[int]) -> list
 def retrieve(conn: sqlite3.Connection, query: str) -> dict:
     """检索主流程（§7）：返回 {"notes", "materials", "vector_ok", "weak_recall"}。
 
-    - vector_ok=False 表示向量路不可用（Ollama 挂/库内无向量），界面提示"语义检索暂不可用"（§14 第 8 条）；
+    - vector_ok=False 表示向量路不可用（Ollama 挂/库内无向量/已关闭 §35），界面提示"语义检索暂不可用"（§14 第 8 条）；
     - notes 为 RRF 融合后的 Top-N（不含材料层命中）；
     - materials 为材料层兜底命中（可能为空），由调用方附在答案末尾；
     - weak_recall=True 表示召回不足（Top-1 相似度 < 阈值或两路均无命中），prompt 需明示（§7 兜底）。
     """
     query = (query or "").strip()
+    embedding_enabled = settings.get_bool(
+        conn, settings.KEY_EMBEDDING_ENABLED, config.EMBEDDING_ENABLED
+    )
     if not query:
-        return {"notes": [], "materials": [], "vector_ok": True, "weak_recall": True}
+        return {
+            "notes": [],
+            "materials": [],
+            "vector_ok": embedding_enabled,
+            "weak_recall": True,
+        }
 
     # 检索参数（§28：设置页可改，DB 覆盖 .env 默认值；改动立即生效）
     vector_top_k = settings.get_int(conn, settings.KEY_VECTOR_TOP_K, config.VECTOR_TOP_K)
@@ -160,20 +168,21 @@ def retrieve(conn: sqlite3.Connection, query: str) -> dict:
     vector_min_sim = settings.get_float(conn, settings.KEY_VECTOR_MIN_SIM, config.VECTOR_MIN_SIM)
     materials_top_k = settings.get_int(conn, settings.KEY_MATERIALS_TOP_K, config.MATERIALS_TOP_K)
 
-    # 1. 向量召回（Ollama 不可用整路跳过，§7 / §14 第 8 条）
+    # 1. 向量召回（Ollama 不可用/已关闭（§35）整路跳过，§7 / §14 第 8 条）
     vector_ok = False
     vector_hits: list[int] = []
     top1_sim = 0.0
-    try:
-        qvec = np.asarray(embedding.embed_texts([query])[0], dtype="<f4")
-        vectors = embedding.load_all_embeddings(conn)
-        if vectors:
-            vector_ok = True
-            scored = embedding.cosine_top_k(qvec, vectors, vector_top_k)
-            vector_hits = [nid for nid, _ in scored]
-            top1_sim = scored[0][1] if scored else 0.0
-    except embedding.EmbeddingError as e:
-        logger.info("向量检索不可用（%s），降级 FTS-only", e)
+    if embedding_enabled:
+        try:
+            qvec = np.asarray(embedding.embed_texts([query])[0], dtype="<f4")
+            vectors = embedding.load_all_embeddings(conn)
+            if vectors:
+                vector_ok = True
+                scored = embedding.cosine_top_k(qvec, vectors, vector_top_k)
+                vector_hits = [nid for nid, _ in scored]
+                top1_sim = scored[0][1] if scored else 0.0
+        except embedding.EmbeddingError as e:
+            logger.info("向量检索不可用（%s），降级 FTS-only", e)
 
     # 2. FTS 关键词召回
     fts_hits = fts_search(conn, query, fts_top_k)

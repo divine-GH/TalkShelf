@@ -69,6 +69,13 @@
     <div class="note-item">
       <p class="set-group-title">Ollama 模型（本地 Embedding）</p>
       <label class="set-row">
+        <span class="set-label">启用本地 Embedding（向量检索）
+          <span class="set-hint">关闭后不做向量化与语义检索：查重退 FTS 近似版、问答退关键词检索；没装 Ollama 的机器可关闭，避免补向量反复重试</span>
+        </span>
+        <input type="checkbox" id="embedding-enabled" {% if s.embedding_enabled %}checked{% endif %}>
+        <span class="set-dirty" data-for="embedding-enabled" title="已修改但未保存" hidden></span>
+      </label>
+      <label class="set-row">
         <span class="set-label">Embedding 模型
           <span class="set-hint">本地 Ollama 服务地址由 .env 的 OLLAMA_URL 配置</span>
         </span>
@@ -382,8 +389,8 @@
   // 「已修改但未保存」标注：控件变化即与保存基线（SNAPSHOT）比对，保存成功后重置基线
   var SNAPSHOT = {};
   var DIRTY_IDS = ['weekly-llm', 'default-category', 'llm-provider', 'llm-model', 'embed-model',
-                   'search-model', 'vector-top-k', 'fts-top-k', 'ask-top-n', 'vector-min-sim',
-                   'materials-top-k'];
+                   'embedding-enabled', 'search-model', 'vector-top-k', 'fts-top-k', 'ask-top-n',
+                   'vector-min-sim', 'materials-top-k'];
 
   function fieldValue(id) {
     if (id === 'llm-model') return llmModelCtl.value();
@@ -430,6 +437,7 @@
     }
     var body = {
       weekly_llm: document.getElementById('weekly-llm').checked,
+      embedding_enabled: document.getElementById('embedding-enabled').checked,
       default_category: document.getElementById('default-category').value,
       llm_provider: document.getElementById('llm-provider').value,
       llm_model: llmModel,

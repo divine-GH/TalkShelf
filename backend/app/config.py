@@ -22,7 +22,7 @@ load_dotenv(BASE_DIR / ".env")
 # 版本信息（语义化版本；发版流程：bump APP_VERSION → CHANGELOG.md 追加 → git tag vX.Y.Z）
 # ---------------------------------------------------------------------------
 APP_NAME = "note-brain"
-APP_VERSION = "0.7.3"  # 与最近的 vX.Y.Z tag 对应；发新版本时 bump
+APP_VERSION = "0.7.4"  # 与最近的 vX.Y.Z tag 对应；发新版本时 bump
 
 
 def _env_int(name: str, default: int) -> int:
@@ -111,6 +111,9 @@ WEB_FETCH_TOOL_MAX_ROUNDS = _env_int("WEB_FETCH_TOOL_MAX_ROUNDS", 3)  # 单轮�
 # ---------------------------------------------------------------------------
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")  # §10：只绑回环
 EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3")  # 1024 维
+EMBEDDING_ENABLED = (
+    os.getenv("EMBEDDING_ENABLED", "1") == "1"
+)  # 总开关（§35）：关 = 不做向量化/向量检索，查重退 FTS、问答退关键词路；无 Ollama 环境用
 EMBED_TIMEOUT = _env_int("EMBED_TIMEOUT", 30)  # 秒
 EMBED_TEXT_LIMIT = _env_int("EMBED_TEXT_LIMIT", 6000)  # 单条笔记向量化文本上限（字符）
 

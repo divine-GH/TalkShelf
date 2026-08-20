@@ -11,7 +11,7 @@ import logging
 import re
 import sqlite3
 
-from . import config, db, embedding, llm
+from . import config, db, embedding, llm, settings
 
 logger = logging.getLogger(__name__)
 
@@ -67,13 +67,18 @@ def fts_candidates(conn: sqlite3.Connection, note: dict) -> list[dict]:
 def check_duplicate(conn: sqlite3.Connection, note: dict) -> int | None:
     """查重：返回重复的旧笔记 id 或 None。LLM 失败抛 LLMError（调用方记日志不反噬）。
 
-    向量版优先（§6.2）；Ollama 不可用/库内无向量时退化为 FTS 近似版（§14 第 8 条），不报错。
+    向量版优先（§6.2）；Ollama 不可用/库内无向量/已关闭（§35）时退化为 FTS 近似版（§14 第 8 条），不报错。
     """
+    emb_on = settings.get_bool(conn, settings.KEY_EMBEDDING_ENABLED, config.EMBEDDING_ENABLED)
     candidates: list[dict] = []
-    try:
-        candidates = embedding.vector_candidates(conn, note, config.DEDUP_VECTOR_TOP_K)
-    except embedding.EmbeddingError as e:
-        logger.info("向量查重不可用（%s），退化为 FTS 近似版", e)
+    if emb_on:
+        try:
+            candidates = embedding.vector_candidates(conn, note, config.DEDUP_VECTOR_TOP_K)
+        except embedding.EmbeddingError as e:
+            logger.info("向量查重不可用（%s），退化为 FTS 近似版", e)
+            candidates = fts_candidates(conn, note)
+    else:
+        logger.info("embedding 已关闭（§35），查重直接走 FTS 近似版")
         candidates = fts_candidates(conn, note)
     if not candidates:
         return None

@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import config, db, dedup, embedding, llm, notes
+from . import config, db, dedup, embedding, llm, notes, settings
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +53,12 @@ class ReprocessQueue:
         self._q.put_nowait((note_id, dedup))
 
     def scan_pending(self) -> None:
-        """应用启动时补做（§14 第 5、8 条）：pending 全量 + processed 缺向量。"""
+        """应用启动时补做（§14 第 5、8 条）：pending 全量 + processed 缺向量（仅 embedding 开启时）。"""
         conn = db.connect()
         try:
+            emb_on = settings.get_bool(
+                conn, settings.KEY_EMBEDDING_ENABLED, config.EMBEDDING_ENABLED
+            )
             rows = conn.execute(
                 """SELECT id, status FROM notes WHERE status = 'pending'
                    UNION
@@ -65,7 +68,10 @@ class ReprocessQueue:
         finally:
             conn.close()
         for row in rows:
-            # pending（待整理，未查过重）→ dedup；processed 缺向量（老笔记）→ 只补向量不查重
+            # pending（待整理，未查过重）→ dedup；processed 缺向量（老笔记）→ 只补向量不查重。
+            # embedding 关闭时（§35）不扫「缺向量」老笔记：无向量可补，扫了也只是空跑。
+            if row["status"] != "pending" and not emb_on:
+                continue
             self.submit(row["id"], dedup=(row["status"] == "pending"))
 
     # ------------------------------------------------------------------ worker
@@ -134,14 +140,22 @@ class ReprocessQueue:
                 notes.apply_organized(conn, note_id, data, set_kind=bool(note.get("quick")))
                 conn.commit()
                 note = db.fetch_note(conn, note_id)
-            # 2. embedding 补算（缺向量才算；失败抛 EmbeddingError 走退避但不标 failed，§14 第 8 条）
-            has_emb = conn.execute(
-                "SELECT 1 FROM embeddings WHERE note_id = ?", (note_id,)
-            ).fetchone()
-            if not has_emb:
-                vec = embedding.embed_note(note)
-                embedding.save_embedding(conn, note_id, vec)
-                conn.commit()
+            # 2. embedding 补算（缺向量才算；失败抛 EmbeddingError 走退避但不标 failed，§14 第 8 条；
+            #    §35 关闭时整段跳过——不开就不算，也不反复重试）
+            emb_on = settings.get_bool(
+                conn, settings.KEY_EMBEDDING_ENABLED, config.EMBEDDING_ENABLED
+            )
+            if emb_on:
+                has_emb = (
+                    conn.execute(
+                        "SELECT 1 FROM embeddings WHERE note_id = ?", (note_id,)
+                    ).fetchone()
+                    is not None
+                )
+                if not has_emb:
+                    vec = embedding.embed_note(note)
+                    embedding.save_embedding(conn, note_id, vec)
+                    conn.commit()
             # 3. FTS 同步（幂等；落库事务已同步过，这里防御性再同步）
             db.fts_sync(conn, note_id)
             # 4. 查重（仅新笔记一次；失败只记日志，不反噬入库，§21.2 #5）

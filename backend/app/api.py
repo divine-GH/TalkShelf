@@ -976,6 +976,7 @@ def search_history_delete(record_id: int, conn: ConnDep, _auth: ApiAuthDep) -> R
 # PUT /api/settings 允许的键 → 类型（None 表示恢复默认 = 删除覆盖行）
 SETTINGS_FIELDS: dict[str, type] = {
     "weekly_llm": bool,
+    "embedding_enabled": bool,  # §35：本地 embedding 总开关（关 = 向量化/向量检索全跳过）
     "default_category": str,
     "llm_provider": str,
     "llm_model": str,
@@ -1000,9 +1001,9 @@ def _settings_payload(conn: sqlite3.Connection) -> dict:
 
 def _validate_setting(key: str, value: object) -> None:
     """单键取值校验；非法抛 HTTPException(422)。"""
-    if key == "weekly_llm":
+    if key in ("weekly_llm", "embedding_enabled"):
         if not isinstance(value, bool):
-            raise HTTPException(status_code=422, detail="weekly_llm 须为布尔值")
+            raise HTTPException(status_code=422, detail=f"{key} 须为布尔值")
     elif key == "default_category":
         if not (value == "" or value in config.CATEGORIES):
             raise HTTPException(status_code=422, detail=f"default_category 不在分类体系内: {value}")

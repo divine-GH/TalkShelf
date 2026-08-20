@@ -1,4 +1,4 @@
-﻿# note-brain 一键启动脚本
+# note-brain 一键启动脚本
 # 用法：右键「使用 PowerShell 运行」，或 `powershell -File start.ps1`
 # 自动处理：Ollama 未运行 → 启动；Ollama 运行但 bge-m3 不可见（重启后 app 自启的环境坑）→ 重启 serve
 # 停止：在窗口中按 Ctrl+C
@@ -10,14 +10,19 @@ $hostAddr = '127.0.0.1'   # 本机访问。想用手机/局域网访问改成 '0
 
 Write-Host '=== note-brain 启动 ==='
 
-# 1. 确保 Ollama + bge-m3 可用
+# 1. 确保 Ollama + bge-m3 可用（未安装 Ollama 则跳过：分发环境可在设置页关闭「本地 Embedding」）
 $needStart = $false
-try {
-    $tags = Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 3
-    $hasModel = $tags.models | Where-Object { $_.name -like 'bge-m3*' }
-    if (-not $hasModel) { $needStart = $true }
-} catch {
-    $needStart = $true
+if (Test-Path $ollama) {
+    try {
+        $tags = Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 3
+        $hasModel = $tags.models | Where-Object { $_.name -like 'bge-m3*' }
+        if (-not $hasModel) { $needStart = $true }
+    } catch {
+        $needStart = $true
+    }
+} else {
+    Write-Host '[..] 未检测到 Ollama：语义检索/向量查重不可用'
+    Write-Host '      （安装 Ollama 后重启即恢复；也可在设置页关闭「本地 Embedding」）'
 }
 
 if ($needStart) {
