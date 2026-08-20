@@ -10,6 +10,15 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.7.6] - 2026-08-20
+
+### Changed
+
+- **记录页/问答页输入框示例改为随机占位文案**：placeholder 不再写死，每次进入或刷新页面时
+  从 `backend/app/data/examples_record.txt` / `examples_ask.txt` 随机挑一条显示（每行一条，
+  `#` 注释行跳过，UTF-8）；示例文件缺失或为空时回退原来的静态文案。想换示例直接改这两个
+  文件即可，保存后刷新页面立即生效，无需重启。
+
 ## [0.7.5] - 2026-08-20
 
 ### Changed

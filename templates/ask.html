@@ -6,7 +6,7 @@
   <h1>问点什么</h1>
   <p class="hint">用对话的方式找回记过的内容。单轮问答：答案带引用来源，点击可跳转原笔记。</p>
   <form id="ask-form" class="record-form">
-    <textarea id="ask-input" rows="3" placeholder="例如：我上次记的那个上传文件的坑是啥？" autofocus></textarea>
+    <textarea id="ask-input" rows="3" placeholder="{{ ask_placeholder }}" autofocus></textarea>
     <button type="submit" class="btn btn-primary btn-lg">提问</button>
   </form>
   <p id="ask-error" class="error" hidden></p>

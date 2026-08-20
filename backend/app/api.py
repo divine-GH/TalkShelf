@@ -19,7 +19,19 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from . import auth, config, db, fetch, llm, notes, providers, retrieval, settings, web_search
+from . import (
+    auth,
+    config,
+    db,
+    examples,
+    fetch,
+    llm,
+    notes,
+    providers,
+    retrieval,
+    settings,
+    web_search,
+)
 from . import queue as queue_mod
 
 logger = logging.getLogger(__name__)
@@ -1194,13 +1206,16 @@ def index_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLRespo
             "drafts": [dict(d) for d in drafts],
             "categories": config.CATEGORIES,
             "active": "index",
+            "record_placeholder": examples.random_example("record"),
         },
     )
 
 
 @router.get("/ask", response_class=HTMLResponse)
 def ask_page(request: Request, _sess: PageAuthDep) -> HTMLResponse:
-    return render(request, "ask.html", {"active": "ask"})
+    return render(
+        request, "ask.html", {"active": "ask", "ask_placeholder": examples.random_example("ask")}
+    )
 
 
 @router.get("/review", response_class=HTMLResponse)

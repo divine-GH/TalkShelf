@@ -6,7 +6,7 @@
   <h1>记点什么</h1>
   <p class="hint">像跟助理说话一样：口语片段、链接 + 描述都行。AI 先帮你整理，你拍板后才入库；<br>或点「快速记录」直接入库，AI 自动判断是收藏还是兴趣。</p>
   <form id="record-form" class="record-form">
-    <textarea id="record-input" rows="3" placeholder="例如：今天发现 nginx client_max_body_size 默认 1M，上传大文件被拒，帮我记下 https://example.com/…" autofocus></textarea>
+    <textarea id="record-input" rows="3" placeholder="{{ record_placeholder }}" autofocus></textarea>
     <div class="record-actions">
       <button type="submit" class="btn btn-primary btn-lg" data-mode="chat">开始记录</button>
       <button type="submit" class="btn btn-lg" data-mode="quick">⚡ 快速记录</button>
