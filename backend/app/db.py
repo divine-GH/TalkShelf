@@ -131,7 +131,9 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
     """新建一个连接并执行连接级 PRAGMA（每次调用都执行，勿只依赖建库时的一次）。"""
     path = Path(db_path) if db_path else config.DATABASE_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=10)
+    # check_same_thread=False：FastAPI 的 sync 依赖（get_conn）与端点由线程池执行，
+    # 同一请求的建连/用连/关连可能落在不同 worker 线程；每请求独享连接、无并发使用，关闭线程检查是安全的
+    conn = sqlite3.connect(path, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")  # 删除笔记时 tags/entities/embeddings/对话 级联清理
     conn.execute("PRAGMA journal_mode = WAL")  # 读写并发更稳
