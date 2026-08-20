@@ -7,6 +7,7 @@ M2+ 再补：/api/ask、/api/review、/api/notes/{id}（详情/PUT/DELETE）、/
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -25,8 +26,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# URL 匹配排除中文/全角标点，避免把后续文本吃进 URL（如 "http://x.cn/2，以及…"）
-_URL_RE = re.compile(r"https?://[^\s<>\"'，。；：！？、（）【】《》「」『』]+")
 TEMPLATES = Jinja2Templates(directory=str(config.BASE_DIR / "templates"))
 TEMPLATES.env.autoescape = True  # Starlette 默认不开 autoescape，必须显式开启
 
@@ -127,96 +126,174 @@ def _history(conn: sqlite3.Connection, conv_id: int) -> list[dict]:
     ]
 
 
-def extract_urls(message: str) -> list[str]:
-    """从用户消息提取 http(s) URL（去重）。"""
-    seen: set[str] = set()
-    urls: list[str] = []
-    for m in _URL_RE.findall(message):
-        url = m.rstrip(".,;:!?)]}")
-        if url not in seen:
-            seen.add(url)
-            urls.append(url)
-    return urls
+# ---------------------------------------------------------------------------
+# 对话后台整理（§32）：端点只落用户消息立即返回，LLM 回复在事件循环后台生成
+# ---------------------------------------------------------------------------
 
 
-def _step_conversation(conn: sqlite3.Connection, conv_id: int, message: str) -> dict:
-    """追加一条用户消息 → 直抓链接正文 + 原生搜索（按意图词触发）→ LLM 回复（可调 web_fetch）→ 落消息。"""
-    conv = _fetch_conversation(conn, conv_id)
-    if conv["status"] != "draft":
-        raise HTTPException(status_code=409, detail="对话已归档，不可继续")
+class ConversationRunner:
+    """对话后台整理调度器：sync 端点（线程池线程）→ 事件循环任务。
 
-    conn.execute(
-        "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'user', 'text', ?)",
-        (conv_id, message),
-    )
+    - kick() 线程安全（GIL 集合操作 + call_soon_threadsafe），同一对话同时只跑一个任务；
+    - _run 逐轮处理：一轮 = 回复「最近一条 assistant 文本回复之后」的全部用户消息，
+      用户连发多条时自动续轮，直到没有待回复消息（§32）；
+    - 与异步补做队列（queue.ReprocessQueue）同生命周期：uvicorn 必须单 worker（进程内任务）。
+    """
 
-    # 链接正文抓取（服务端直抓保留，§22.4 #6）：用户消息含 URL 即抓，失败降级不阻塞
-    fetched_urls: list[str] = []
-    for url in extract_urls(message):
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self.loop = loop
+        self._active: set[int] = set()  # 正在处理/已排队调度的对话 id
+        self._jobs: set[asyncio.Task] = set()
+
+    def kick(self, conv_id: int) -> None:
+        """请求处理某对话；已在处理/排队中则忽略（防重复调度）。"""
+        if conv_id in self._active:
+            return
+        self._active.add(conv_id)
+        self.loop.call_soon_threadsafe(self._spawn, conv_id)
+
+    def _spawn(self, conv_id: int) -> None:
+        job = asyncio.create_task(self._run(conv_id), name=f"conv-{conv_id}")
+        self._jobs.add(job)
+        job.add_done_callback(self._jobs.discard)
+
+    async def _run(self, conv_id: int) -> None:
         try:
-            result = fetch.fetch_page(url)
-            msg = fetch.fetched_message(result)
+            while _has_pending_round(conv_id):
+                try:
+                    await asyncio.to_thread(_process_round, conv_id)
+                except Exception as e:  # noqa: BLE001 —— 单轮失败记日志后停止（LLM/抓取/搜索失败已在轮内降级）
+                    logger.error("对话 #%s 后台整理失败，停止本对话任务: %s", conv_id, e)
+                    break
+        finally:
+            self._active.discard(conv_id)
+
+    async def stop(self) -> None:
+        """关停（lifespan）：取消全部任务并等待退出（测试间不残留跨用例任务）。"""
+        for job in list(self._jobs):
+            job.cancel()
+        for job in list(self._jobs):
+            try:
+                await job
+            except asyncio.CancelledError:
+                pass
+
+
+def _has_pending_round(conv_id: int) -> bool:
+    """是否有待处理的对话轮次：draft 且存在「最近一条 assistant 文本回复之后」的用户消息。"""
+    conn = db.connect()
+    try:
+        conv = conn.execute("SELECT status FROM conversations WHERE id = ?", (conv_id,)).fetchone()
+        if not conv or conv["status"] != "draft":
+            return False
+        row = conn.execute(
+            """SELECT EXISTS(
+                   SELECT 1 FROM messages m
+                   WHERE m.conversation_id = ?
+                     AND m.role = 'user' AND m.kind = 'text'
+                     AND m.id > COALESCE((SELECT MAX(id) FROM messages
+                                          WHERE conversation_id = ? AND role = 'assistant' AND kind = 'text'), 0)
+               ) AS has_pending""",
+            (conv_id, conv_id),
+        ).fetchone()
+        return bool(row["has_pending"])
+    finally:
+        conn.close()
+
+
+def _process_round(conv_id: int) -> None:
+    """后台处理一轮对话（§32）：抓取 + 搜索 + LLM 回复 → 落消息。
+
+    一轮 = 回复「最近一条 assistant 文本回复之后」的全部用户消息（含其间到达的新消息，
+    避免重复回复：回复插入后新消息就不再位于回复之后）；已归档/放弃的对话直接返回
+    （与拍板/删除的竞态由 status='draft' 检查兜住）。
+    """
+    conn = db.connect()
+    try:
+        conv = conn.execute("SELECT * FROM conversations WHERE id = ?", (conv_id,)).fetchone()
+        if not conv or conv["status"] != "draft":
+            return  # 已归档/放弃（拍板/删除竞态）：不再处理
+        last_reply = conn.execute(
+            "SELECT MAX(id) AS mid FROM messages WHERE conversation_id=? AND role='assistant' AND kind='text'",
+            (conv_id,),
+        ).fetchone()
+        last_reply_id = last_reply["mid"] or 0
+        pending = conn.execute(
+            "SELECT * FROM messages WHERE conversation_id=? AND role='user' AND kind='text' AND id > ? ORDER BY id",
+            (conv_id, last_reply_id),
+        ).fetchall()
+        if not pending:
+            return
+
+        # 链接正文抓取（服务端直抓保留，§22.4 #6）：待处理消息含 URL 即抓，失败降级不阻塞
+        fetched_urls: list[str] = []
+        for m in pending:
+            for url in fetch.extract_urls(m["content"]):
+                try:
+                    result = fetch.fetch_page(url)
+                    msg = fetch.fetched_message(result)
+                    conn.execute(
+                        "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'fetched_page', ?)",
+                        (conv_id, msg["content"]),
+                    )
+                    fetched_urls.append(url)
+                except fetch.FetchError as e:
+                    logger.warning("抓取失败（降级，不阻塞）%s: %s", url, e)
+
+        # 原生联网搜索（§6.5：用户明确要求才搜；失败降级不阻塞，对话照常）
+        searched = False
+        if any(web_search.should_search(m["content"]) for m in pending):
+            try:
+                items = web_search.search(pending[-1]["content"])
+                content = web_search.results_to_material(items)
+                conn.execute(
+                    "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'search_result', ?)",
+                    (conv_id, content),
+                )
+                searched = True
+            except web_search.SearchError as e:
+                logger.warning("搜索失败（降级，不阻塞）: %s", e)
+
+        context_note = (
+            db.fetch_note(conn, conv["context_note_id"]) if conv["context_note_id"] else None
+        )
+        # 有搜索结果时声明 web_fetch 工具：LLM 可主动跟进抓全文（§6.6/§22.3）
+        tools = [llm.WEB_FETCH_TOOL] if searched else None
+        try:
+            reply = llm.organize_conversation(
+                _history(conn, conv_id), context_note=context_note, tools=tools
+            )
+        except llm.LLMError as e:
+            logger.warning("LLM 不可用，对话降级直存模式: %s", e)
+            degraded = "（AI 整理服务暂不可用：对话可继续，或直接拍板原文保存，稍后自动补整理。）"
+            conn.execute(
+                "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'text', ?)",
+                (conv_id, degraded),
+            )
+            conn.execute(
+                "UPDATE conversations SET updated_at = datetime('now','localtime') WHERE id = ?",
+                (conv_id,),
+            )
+            conn.commit()
+            return
+
+        # 工具循环里执行的抓取落库（追溯 + Tier 2 材料检索；LLM 已见同一份文本）
+        for m in reply.get("tool_materials", []):
             conn.execute(
                 "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'fetched_page', ?)",
-                (conv_id, msg["content"]),
+                (conv_id, m["content"]),
             )
-            fetched_urls.append(url)
-        except fetch.FetchError as e:
-            logger.warning("抓取失败（降级，不阻塞）%s: %s", url, e)
-
-    # 原生联网搜索（§6.5：用户明确要求才搜；失败降级不阻塞，对话照常）
-    searched = False
-    if web_search.should_search(message):
-        try:
-            items = web_search.search(message)
-            content = web_search.results_to_material(items)
-            conn.execute(
-                "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'search_result', ?)",
-                (conv_id, content),
-            )
-            searched = True
-        except web_search.SearchError as e:
-            logger.warning("搜索失败（降级，不阻塞）: %s", e)
-
-    conn.execute(
-        "UPDATE conversations SET updated_at = datetime('now','localtime') WHERE id = ?", (conv_id,)
-    )
-
-    context_note = db.fetch_note(conn, conv["context_note_id"]) if conv["context_note_id"] else None
-    # 有搜索结果时声明 web_fetch 工具：LLM 可主动跟进抓全文（§6.6/§22.3）
-    tools = [llm.WEB_FETCH_TOOL] if searched else None
-    try:
-        reply = llm.organize_conversation(
-            _history(conn, conv_id), context_note=context_note, tools=tools
-        )
-    except llm.LLMError as e:
-        logger.warning("LLM 不可用，对话降级直存模式: %s", e)
-        degraded = "（AI 整理服务暂不可用：对话可继续，或直接拍板原文保存，稍后自动补整理。）"
         conn.execute(
             "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'text', ?)",
-            (conv_id, degraded),
+            (conv_id, reply["text"]),
+        )
+        conn.execute(
+            "UPDATE conversations SET updated_at = datetime('now','localtime') WHERE id = ?",
+            (conv_id,),
         )
         conn.commit()
-        return {"reply": degraded, "degraded": True, "fetched": fetched_urls, "searched": searched}
-
-    # 工具循环里执行的抓取落库（追溯 + Tier 2 材料检索；LLM 已见同一份文本）
-    for m in reply.get("tool_materials", []):
-        conn.execute(
-            "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'fetched_page', ?)",
-            (conv_id, m["content"]),
-        )
-    conn.execute(
-        "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'text', ?)",
-        (conv_id, reply["text"]),
-    )
-    conn.commit()
-    return {
-        "reply": reply["text"],
-        "organized": reply["organized"] is not None,
-        "degraded": False,
-        "fetched": fetched_urls,
-        "searched": searched,
-    }
+    finally:
+        conn.close()
 
 
 def _confirm(
@@ -276,26 +353,50 @@ def version_info() -> dict:
 
 
 @router.post("/api/conversations")
-def create_conversation(body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
+def create_conversation(body: dict, conn: ConnDep, request: Request, _auth: ApiAuthDep) -> dict:
+    """发起记录对话（§32）：用户消息立即落库并返回，LLM 回复后台异步生成。
+
+    对话页打开时最后一条是用户消息 → 显示「思考中…」并轮询直到回复到达。
+    """
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(status_code=422, detail="message 不能为空")
     context_note_id = body.get("context_note_id")
     cur = conn.execute(
-        "INSERT INTO conversations(status, context_note_id) VALUES ('draft', ?)",
+        "INSERT INTO conversations(status, context_note_id, updated_at) VALUES ('draft', ?, datetime('now','localtime'))",
         (context_note_id,),
     )
     conv_id = cur.lastrowid
-    result = _step_conversation(conn, conv_id, message)
-    return {"conversation_id": conv_id, **result}
+    conn.execute(
+        "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'user', 'text', ?)",
+        (conv_id, message),
+    )
+    conn.commit()
+    request.app.state.conv_runner.kick(conv_id)
+    return {"conversation_id": conv_id}
 
 
 @router.post("/api/conversations/{conv_id}/messages")
-def add_message(conv_id: int, body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
+def add_message(
+    conv_id: int, body: dict, conn: ConnDep, request: Request, _auth: ApiAuthDep
+) -> dict:
+    """追加一条用户消息（§32）：立即返回，LLM 回复后台异步生成（连发消息自动续轮）。"""
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(status_code=422, detail="message 不能为空")
-    return _step_conversation(conn, conv_id, message)
+    conv = _fetch_conversation(conn, conv_id)
+    if conv["status"] != "draft":
+        raise HTTPException(status_code=409, detail="对话已归档，不可继续")
+    conn.execute(
+        "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'user', 'text', ?)",
+        (conv_id, message),
+    )
+    conn.execute(
+        "UPDATE conversations SET updated_at = datetime('now','localtime') WHERE id = ?", (conv_id,)
+    )
+    conn.commit()
+    request.app.state.conv_runner.kick(conv_id)
+    return {"conversation_id": conv_id}
 
 
 @router.post("/api/conversations/{conv_id}/confirm")
@@ -377,6 +478,22 @@ def create_note(body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> d
     note = notes.create_note_direct(conn, raw, kind)
     conn.commit()
     rq.submit(note["id"])
+    return {"note_id": note["id"]}
+
+
+@router.post("/api/quick-notes", status_code=202)
+def create_quick_note(body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
+    """快速记录（§32）：原文立即落库，LLM 后台判断兴趣/收藏并整理，不进对话/确认页。
+
+    处理中（pending + quick）列表/详情以用户原话（raw）占位显示 + 「判断中…」徽标；
+    LLM 判断完成后 kind 与元数据更新为整理结果。
+    """
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="message 不能为空")
+    note = notes.create_quick_note(conn, message)
+    conn.commit()
+    rq.submit(note["id"])  # 补做管线：LLM 判断 kind + 整理 → embedding → 查重 → FTS
     return {"note_id": note["id"]}
 
 

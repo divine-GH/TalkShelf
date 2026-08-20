@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
 import urllib.parse
 from dataclasses import dataclass
@@ -33,9 +34,24 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 
+# URL 匹配排除中文/全角标点，避免把后续文本吃进 URL（如 "http://x.cn/2，以及…"）
+_URL_RE = re.compile(r"https?://[^\s<>\"'，。；：！？、（）【】《》「」『』]+")
+
 
 class FetchError(Exception):
     """抓取失败（网络错误/SSRF 拒绝/超时/超限）。调用方降级处理，不阻塞记录。"""
+
+
+def extract_urls(message: str) -> list[str]:
+    """从用户消息提取 http(s) URL（去重）。抓取/快速记录共用。"""
+    seen: set[str] = set()
+    urls: list[str] = []
+    for m in _URL_RE.findall(message):
+        url = m.rstrip(".,;:!?)]}")
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
 
 
 @dataclass

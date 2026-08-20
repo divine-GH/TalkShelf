@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS notes (
     status      TEXT DEFAULT 'pending',
     merged_into INTEGER,
     duplicate_of INTEGER,           -- 查重判定结果：疑似重复的目标笔记 id（M3 起落库，§6.2/§24）
+    quick       INTEGER DEFAULT 0,  -- 快速记录标记（§32：kind 由 LLM 判断，处理中显示「判断中…」）
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     processed_at TEXT
 );
@@ -160,6 +161,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(notes)")}
     if "duplicate_of" not in cols:
         conn.execute("ALTER TABLE notes ADD COLUMN duplicate_of INTEGER")
+    if "quick" not in cols:
+        conn.execute("ALTER TABLE notes ADD COLUMN quick INTEGER DEFAULT 0")
 
 
 # ---------------------------------------------------------------------------

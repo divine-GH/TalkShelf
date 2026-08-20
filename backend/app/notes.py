@@ -6,10 +6,13 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 
-from . import config, db, llm, settings
+from . import config, db, fetch, llm, settings
+
+logger = logging.getLogger(__name__)
 
 _FETCHED_URL_RE = re.compile(r"^Fetched (\S+)")
 _MD_LINK_RE = re.compile(r"\]\((https?://[^)\s]+)\)")
@@ -31,11 +34,18 @@ class ConflictError(Exception):
     """状态冲突（如对话已归档再拍板）。"""
 
 
-def apply_organized(conn: sqlite3.Connection, note_id: int, data: dict) -> None:
-    """把 LLM 整理结果写入元数据 + 标签 + 实体，并同步 FTS（设计文档 §4.3 重整理管线）。"""
+def apply_organized(
+    conn: sqlite3.Connection, note_id: int, data: dict, *, set_kind: bool = False
+) -> None:
+    """把 LLM 整理结果写入元数据 + 标签 + 实体，并同步 FTS（设计文档 §4.3 重整理管线）。
+
+    set_kind=True 时同时写入 kind（§32 快速记录：兴趣/收藏由 LLM 判断）；
+    普通对话的 kind 由用户拍板决定（§6.4），不覆盖。
+    """
+    kind_sql = ", kind=?" if set_kind else ""
     conn.execute(
-        """UPDATE notes SET title=?, category=?, summary=?, content=?, importance=?,
-                  source_url=?, processed_at=datetime('now','localtime') WHERE id=?""",
+        f"""UPDATE notes SET title=?, category=?, summary=?, content=?, importance=?,
+                  source_url=?, processed_at=datetime('now','localtime'){kind_sql} WHERE id=?""",
         (
             data["title"],
             data["category"],
@@ -43,6 +53,7 @@ def apply_organized(conn: sqlite3.Connection, note_id: int, data: dict) -> None:
             data.get("content"),
             data["importance"],
             data.get("source_url"),
+            *((data["kind"],) if set_kind else ()),
             note_id,
         ),
     )
@@ -172,6 +183,69 @@ def create_note_direct(conn: sqlite3.Connection, raw: str, kind: str) -> dict:
         (conv_cur.lastrowid, raw),
     )
     return db.fetch_note(conn, note_id)
+
+
+def create_quick_note(conn: sqlite3.Connection, raw: str) -> dict:
+    """POST /api/quick-notes 快速记录（§32）：原文立即落库，LLM 后台判断兴趣/收藏并整理。
+
+    - 不进入对话页/确认页：kind 先占位 'note'，quick=1 标记（列表/详情显示「判断中…」），
+      队列补整理时以 LLM 整理的 kind 覆盖（apply_organized set_kind）；
+    - 处理中浏览时以用户原话（raw）占位显示（title 为空 → 前端回退 raw）；
+    - 消息含链接时同步抓取正文注入归档对话（LLM 整理时可见），并复制进 note_materials
+      （Tier 2 材料检索），失败降级不阻塞；
+    - 归档一条对话便于追溯（同 create_note_direct）。
+    """
+    raw = raw.strip()
+    fallback_cat = settings.get_str(conn, settings.KEY_DEFAULT_CATEGORY, "") or None
+    cur = conn.execute(
+        "INSERT INTO notes(raw, kind, status, category, quick) VALUES (?, 'note', 'pending', ?, 1)",
+        (raw, fallback_cat),
+    )
+    note_id = cur.lastrowid
+    db.fts_sync(conn, note_id)  # pending 也可检索（§14 第 5 条）
+    conv_cur = conn.execute(
+        "INSERT INTO conversations(status, note_id) VALUES ('archived', ?)", (note_id,)
+    )
+    conv_id = conv_cur.lastrowid
+    conn.execute(
+        "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'user', 'text', ?)",
+        (conv_id, raw),
+    )
+    for url in fetch.extract_urls(raw):
+        try:
+            result = fetch.fetch_page(url)
+            msg = fetch.fetched_message(result)
+            conn.execute(
+                "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'fetched_page', ?)",
+                (conv_id, msg["content"]),
+            )
+        except fetch.FetchError as e:
+            logger.warning("快速记录抓取失败（降级，不阻塞）%s: %s", url, e)
+    copy_materials(conn, note_id, _conv_message_rows(conn, conv_id))
+    return db.fetch_note(conn, note_id)
+
+
+def _conv_message_rows(conn: sqlite3.Connection, conv_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM messages WHERE conversation_id = ? ORDER BY id", (conv_id,)
+    ).fetchall()
+
+
+def conversation_history(conn: sqlite3.Connection, note_id: int) -> list[dict] | None:
+    """归档对话的消息历史（queue 补整理时给 LLM 用，含抓取/搜索材料；§32）。
+
+    无归档对话返回 None（调用方回落 raw-only history）。
+    """
+    conv = conn.execute(
+        "SELECT id FROM conversations WHERE note_id = ? AND status = 'archived' ORDER BY id LIMIT 1",
+        (note_id,),
+    ).fetchone()
+    if not conv:
+        return None
+    return [
+        {"role": r["role"], "kind": r["kind"], "content": r["content"]}
+        for r in _conv_message_rows(conn, conv["id"])
+    ]
 
 
 def latest_organized(msgs: list[sqlite3.Row]) -> dict | None:

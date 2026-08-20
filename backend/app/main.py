@@ -1,11 +1,12 @@
 """note-brain FastAPI 入口。
 
-⚠️ 必须单 worker 运行（--workers 1）：异步补做队列在进程内存中，
-多 worker 会各持一个队列、把同一条 pending 笔记重复处理（设计文档 §5）。
+⚠️ 必须单 worker 运行（--workers 1）：异步补做队列与对话后台整理都在进程内存中，
+多 worker 会各持一份、把同一条 pending 笔记/对话重复处理（设计文档 §5 / §32）。
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -25,10 +26,13 @@ async def lifespan(app: FastAPI):
     app.state.queue = q
     q.start()
     q.scan_pending()  # 启动扫描 status='pending' 补处理（§14 第 5 条；failed 不自动重试）
+    # 对话后台整理（§32）：sync 端点经 kick() 调度任务到本事件循环（线程池线程跑 LLM/抓取）
+    app.state.conv_runner = api.ConversationRunner(asyncio.get_running_loop())
     logger.info("note-brain 启动完成，DB: %s", config.DATABASE_PATH)
     try:
         yield
     finally:
+        await app.state.conv_runner.stop()
         await q.stop()
 
 

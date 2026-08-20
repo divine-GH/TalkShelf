@@ -124,10 +124,14 @@ class ReprocessQueue:
                 return
             # 1. 直存笔记补整理（§14 第 5 条）；失败抛 LLMError 走退避 → failed。
             #    分段提交：整理结果先落库——后续阶段失败不回滚已完成的 LLM 成果（幂等重试不重花 token）。
+            #    历史优先取归档对话消息（含抓取/搜索材料，§32 快速记录），无则回落 raw-only。
             if note["status"] == "pending" and not note.get("title"):
-                history = [{"role": "user", "content": note["raw"]}]
+                history = notes.conversation_history(conn, note_id) or [
+                    {"role": "user", "content": note["raw"]}
+                ]
                 data = llm.organize_conversation(history, force_json=True)["organized"]
-                notes.apply_organized(conn, note_id, data)
+                # 快速记录：kind（兴趣/收藏）由 LLM 判断并覆盖占位值（§32）；普通直存不动 kind
+                notes.apply_organized(conn, note_id, data, set_kind=bool(note.get("quick")))
                 conn.commit()
                 note = db.fetch_note(conn, note_id)
             # 2. embedding 补算（缺向量才算；失败抛 EmbeddingError 走退避但不标 failed，§14 第 8 条）
