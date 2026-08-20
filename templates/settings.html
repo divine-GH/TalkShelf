@@ -14,7 +14,7 @@
           <span class="set-hint">关闭后统计页只显示统计文本，省 token、离线可用</span>
         </span>
         <input type="checkbox" id="weekly-llm" {% if s.weekly_llm %}checked{% endif %}>
-        <span class="set-dirty" data-for="weekly-llm" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="weekly-llm" title="已修改但未保存" hidden></span>
       </label>
       <label class="set-row">
         <span class="set-label">默认分类
@@ -26,7 +26,7 @@
           <option value="{{ cat }}" {% if s.default_category == cat %}selected{% endif %}>{{ cat }}</option>
           {% endfor %}
         </select>
-        <span class="set-dirty" data-for="default-category" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="default-category" title="已修改但未保存" hidden></span>
       </label>
     </div>
   </section>
@@ -46,7 +46,7 @@
           <option value="{{ p.id }}" {% if s.llm_provider == p.id %}selected{% endif %}>{{ p.name }}</option>
           {% endfor %}
         </select>
-        <span class="set-dirty" data-for="llm-provider" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="llm-provider" title="已修改但未保存" hidden></span>
       </label>
       <div class="set-row">
         <span class="set-label">可选模型
@@ -61,7 +61,7 @@
           <button type="button" id="llm-custom-ok" class="btn btn-small">确认</button>
           <button type="button" id="llm-custom-cancel" class="btn btn-small">取消</button>
         </span>
-        <span class="set-dirty" data-for="llm-model" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="llm-model" title="已修改但未保存" hidden></span>
       </div>
       <p class="hint" id="model-list-msg"></p>
     </div>
@@ -73,7 +73,7 @@
           <span class="set-hint">本地 Ollama 服务地址由 .env 的 OLLAMA_URL 配置</span>
         </span>
         <input type="text" id="embed-model" value="{{ s.embed_model }}" maxlength="100" autocomplete="off">
-        <span class="set-dirty" data-for="embed-model" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="embed-model" title="已修改但未保存" hidden></span>
       </label>
     </div>
 
@@ -100,7 +100,7 @@
           <button type="button" id="search-custom-ok" class="btn btn-small">确认</button>
           <button type="button" id="search-custom-cancel" class="btn btn-small">取消</button>
         </span>
-        <span class="set-dirty" data-for="search-model" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="search-model" title="已修改但未保存" hidden></span>
       </div>
       <p class="hint" id="search-model-list-msg"></p>
     </div>
@@ -113,27 +113,27 @@
       <label class="set-row">
         <span class="set-label">向量召回 Top-K</span>
         <input type="number" id="vector-top-k" value="{{ s.vector_top_k }}" min="1" max="50">
-        <span class="set-dirty" data-for="vector-top-k" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="vector-top-k" title="已修改但未保存" hidden></span>
       </label>
       <label class="set-row">
         <span class="set-label">关键词召回 Top-K</span>
         <input type="number" id="fts-top-k" value="{{ s.fts_top_k }}" min="1" max="50">
-        <span class="set-dirty" data-for="fts-top-k" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="fts-top-k" title="已修改但未保存" hidden></span>
       </label>
       <label class="set-row">
         <span class="set-label">融合后取 Top-N</span>
         <input type="number" id="ask-top-n" value="{{ s.ask_top_n }}" min="1" max="50">
-        <span class="set-dirty" data-for="ask-top-n" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="ask-top-n" title="已修改但未保存" hidden></span>
       </label>
       <label class="set-row">
         <span class="set-label">相似度阈值（低于视为召回不足）</span>
         <input type="number" id="vector-min-sim" value="{{ s.vector_min_sim }}" min="0" max="1" step="0.05">
-        <span class="set-dirty" data-for="vector-min-sim" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="vector-min-sim" title="已修改但未保存" hidden></span>
       </label>
       <label class="set-row">
         <span class="set-label">材料层兜底条数</span>
         <input type="number" id="materials-top-k" value="{{ s.materials_top_k }}" min="1" max="50">
-        <span class="set-dirty" data-for="materials-top-k" hidden>已修改但未保存</span>
+        <span class="set-dirty" data-for="materials-top-k" title="已修改但未保存" hidden></span>
       </label>
     </div>
   </details>

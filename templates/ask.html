@@ -90,14 +90,28 @@
         const short = h.answer.length > 160 ? h.answer.slice(0, 160) + '…' : h.answer;
         answerHtml = '<div class="note-summary">' + esc(short) + '</div>';
       }
+      const fullAnswer = h.answer
+        ? '<div class="history-answer">' + esc(h.answer).replace(/\n/g, '<br>') + '</div>'
+        : '<div class="hint">这条记录没有保存答案。</div>';
       li.innerHTML =
         '<div class="note-head">' +
-        '<button type="button" class="history-question" title="再次提问">' + esc(h.question) + '</button>' +
+        '<button type="button" class="history-question" title="查看详情">' + esc(h.question) + '</button>' +
         '<button type="button" class="btn btn-small btn-danger" data-del="' + h.id + '">删除</button>' +
         '</div>' +
-        '<div class="note-meta">' + esc(time) + ' · 点击问题可再次提问</div>' +
-        answerHtml;
+        '<div class="note-meta">' + esc(time) + ' · 点击查看完整问答</div>' +
+        answerHtml +
+        '<div class="history-detail" hidden>' +
+        fullAnswer +
+        '<button type="button" class="btn btn-small history-reask">再次提问</button>' +
+        '</div>';
       list.appendChild(li);
+      // 「再次提问」：把问题填回输入框并发起提问（标题点击只负责展开详情）
+      li.querySelector('.history-reask').addEventListener('click', function () {
+        const input = document.getElementById('ask-input');
+        input.value = h.question;
+        input.focus();
+        document.getElementById('ask-form').requestSubmit();
+      });
     });
   }
 
@@ -132,10 +146,12 @@
     }
     const ask = e.target.closest('.history-question');
     if (ask) {
-      const input = document.getElementById('ask-input');
-      input.value = ask.textContent.trim();
-      input.focus();
-      document.getElementById('ask-form').requestSubmit();
+      const li = ask.closest('li');
+      const detail = li.querySelector('.history-detail');
+      if (detail) {
+        detail.hidden = !detail.hidden;  // 就地展开/收起完整问答
+        li.classList.toggle('open', !detail.hidden);
+      }
     }
   });
 

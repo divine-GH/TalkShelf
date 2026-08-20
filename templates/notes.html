@@ -26,8 +26,16 @@
   </div>
 </div>
 
+<div class="view-row">
+  <span class="view-label">视图</span>
+  <div class="view-toggle" id="view-toggle">
+    <button type="button" class="chip" data-view="detail">详细</button>
+    <button type="button" class="chip" data-view="compact">简洁</button>
+  </div>
+</div>
+
 {% if data['items'] %}
-<ul class="note-list">
+<ul class="note-list" id="note-list">
   {% for n in data['items'] %}
   <li class="note-item" id="note-{{ n.id }}">
     <div class="note-head">
@@ -66,4 +74,30 @@
 {% else %}
 <p class="empty">没有符合条件的笔记。</p>
 {% endif %}
+{% endblock %}
+
+{% block script %}
+<script>
+  // 视图切换（详细/简洁）：简洁 = 一行两张卡片、只留标题/徽标/时间；选择存 localStorage 本地记忆
+  (function () {
+    var list = document.getElementById('note-list');
+    if (!list) return;
+    var btns = document.querySelectorAll('#view-toggle .chip');
+    function apply(view) {
+      list.classList.toggle('compact', view === 'compact');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle('on', btns[i].getAttribute('data-view') === view);
+      }
+      try { localStorage.setItem('notes-view', view); } catch (ex) { /* 隐私模式等忽略 */ }
+    }
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () {
+        apply(this.getAttribute('data-view'));
+      });
+    }
+    var saved = null;
+    try { saved = localStorage.getItem('notes-view'); } catch (ex) {}
+    apply(saved === 'compact' ? 'compact' : 'detail');
+  })();
+</script>
 {% endblock %}
