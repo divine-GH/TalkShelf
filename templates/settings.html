@@ -205,8 +205,12 @@
   }
 
   // 可选模型：下拉框按当前提供商拉取（GET /api/settings/models），失败回落内置列表；
-  // 下拉含「自定义模型…」入口（选择后切换为文本输入 + 确认/取消按钮：回车/点确认提交，
-  // 输入与下拉已有选项（含已获取模型列表）相同时直接复用该选项、不新增条目；取消恢复原选择）。
+  // 拉取时机 = 「模型配置」分区首次展开时（toggle 事件），页面加载不再自动拉取（§34）；
+  // 已取得结果（成功或回落）即本次访问内缓存，反复展开/收起不重复拉；请求本身失败不缓存、
+  // 再次展开可重试；离开设置页（整页导航）JS 状态销毁，下次进入首次展开重新拉取。
+  // 提供商切换仍立即重拉（列表与提供商绑定）。下拉含「自定义模型…」入口
+  // （选择后切换为文本输入 + 确认/取消按钮：回车/点确认提交，输入与下拉已有选项
+  // （含已获取模型列表）相同时直接复用该选项、不新增条目；取消恢复原选择）。
   // 「对话/整理模型」与「联网搜索模型」共用 initModelSelect 工厂，各自实例状态独立。
   var DEFAULT_LLM_MODEL = {{ llm_model_default | tojson }};  // .env 默认模型（下拉「（默认值）」标注用）
 
@@ -222,6 +226,9 @@
     var defaultModel = cfg.defaultModel;
     var fetchedModels = [];  // 当前提供商已获取的模型列表
     var lastModelValue = sel.value;  // 进入自定义输入前的下拉值（取消时恢复）
+    var fetched = false;    // 本次页面访问是否已取得过结果（成功或回落；请求失败不置位 → 可重试）
+    var fetching = false;   // 拉取请求进行中（防止展开时重复发起）
+    var reqSeq = 0;         // 请求序号：切换提供商前的慢响应到达后直接丢弃
 
     function value() {
       return wrap.classList.contains('show') ? input.value.trim() : sel.value;
@@ -255,6 +262,8 @@
     }
 
     function loadModels(provider) {
+      var seq = ++reqSeq;
+      fetching = true;
       msg.textContent = '加载模型列表…';
       fetch('/api/settings/models?provider=' + encodeURIComponent(provider))
         .then(function (resp) {
@@ -264,14 +273,27 @@
           });
         })
         .then(function (data) {
+          if (seq !== reqSeq) return;  // 已有更新的请求（如切换提供商）：丢弃过期响应
+          fetched = true;              // 成功或回落都算已取得结果，本次访问不再重复拉
           fillOptions(data.models);
           msg.textContent = data.source === 'api'
             ? ('已从 ' + data.provider_name + ' 拉取 ' + data.models.length + ' 个模型')
             : ('模型列表获取失败：' + data.detail + '（显示内置列表）');
         })
         .catch(function (ex) {
+          if (seq !== reqSeq) return;
+          // 请求本身失败：不置 fetched，再次展开可重试
           msg.textContent = '模型列表获取失败：' + ex.message + '（可在「自定义模型…」手动输入）';
+        })
+        .then(function () {
+          if (seq === reqSeq) fetching = false;
         });
+    }
+
+    // 首次展开「模型配置」时拉取：已取得结果或请求进行中则跳过
+    function loadIfNeeded() {
+      if (fetched || fetching) return;
+      loadModels(providerSel.value);
     }
 
     function commit() {
@@ -332,11 +354,10 @@
     okBtn.addEventListener('click', commit);
     cancelBtn.addEventListener('click', cancelCustom);
     providerSel.addEventListener('change', function (e) {
-      loadModels(e.target.value);
+      loadModels(e.target.value);  // 切换提供商立即重拉（列表与提供商绑定，不依赖展开态）
     });
-    loadModels(providerSel.value);
 
-    return {value: value, commit: commit};
+    return {value: value, commit: commit, loadIfNeeded: loadIfNeeded};
   }
 
   var llmModelCtl = initModelSelect({
@@ -348,6 +369,14 @@
     sel: 'search-model', wrap: 'search-model-custom-wrap', input: 'search-model-custom',
     ok: 'search-custom-ok', cancel: 'search-custom-cancel', msg: 'search-model-list-msg',
     provider: 'search-provider', defaultModel: {{ search_model_default | tojson }}
+  });
+
+  // 模型配置懒加载（§34）：分区首次展开才拉取可选模型；反复展开/收起不重复拉；
+  // 离开设置页（整页导航）后 JS 状态销毁，下次进入设置页首次展开重新拉取。
+  document.getElementById('model-cfg').addEventListener('toggle', function () {
+    if (!this.open) return;
+    llmModelCtl.loadIfNeeded();
+    searchModelCtl.loadIfNeeded();
   });
 
   // 「已修改但未保存」标注：控件变化即与保存基线（SNAPSHOT）比对，保存成功后重置基线
