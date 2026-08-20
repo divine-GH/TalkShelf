@@ -10,6 +10,23 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [Unreleased]
+
+### Added
+
+- **快速记录（首页「⚡ 快速记录」按钮，§32）**：输入后不进对话页/确认页，原文立即落库
+  （POST /api/quick-notes），LLM 后台自主判断兴趣/收藏并整理；处理中浏览（首页最近笔记/列表页/
+  详情页）以用户原话占位显示 + 「判断中…」徽标，完成徽标消失、kind 变为兴趣/收藏；含链接时
+  同步抓取正文（失败降级），补整理时 LLM 可见材料并可被 Tier 2 材料检索命中。notes 表新增
+  `quick` 列（老库自动迁移）。
+
+### Changed
+
+- **记录对话异步化（§32）**：POST /api/conversations、追加消息端点只落用户消息立即返回，
+  LLM 回复后台异步生成；对话页 LLM 未回复完成时显示「思考中…」气泡并自动轮询刷新
+  （抓取/搜索材料实时追加），连发消息自动续轮各得一次回复；确认（拍板）流程与降级路径不变。
+- `extract_urls` 从 api.py 移至 fetch.py（api/notes 共用）。
+
 ## [0.6.1] - 2026-08-20
 
 ### Changed
