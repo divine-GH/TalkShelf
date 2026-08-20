@@ -14,6 +14,7 @@
           <span class="set-hint">关闭后统计页只显示统计文本，省 token、离线可用</span>
         </span>
         <input type="checkbox" id="weekly-llm" {% if s.weekly_llm %}checked{% endif %}>
+        <span class="set-dirty" data-for="weekly-llm" hidden>已修改但未保存</span>
       </label>
       <label class="set-row">
         <span class="set-label">默认分类
@@ -25,13 +26,14 @@
           <option value="{{ cat }}" {% if s.default_category == cat %}selected{% endif %}>{{ cat }}</option>
           {% endfor %}
         </select>
+        <span class="set-dirty" data-for="default-category" hidden>已修改但未保存</span>
       </label>
     </div>
   </section>
 
   <details class="section" id="model-cfg">
     <summary><h2>模型配置</h2></summary>
-    <p class="hint">改完立即生效。对话/整理模型可选多个提供商；联网搜索暂仅支持 DeepSeek。</p>
+    <p class="hint">修改后需点击「保存设置」才生效。对话/整理模型可选多个提供商；联网搜索暂仅支持 DeepSeek。</p>
 
     <div class="note-item">
       <p class="set-group-title">对话/整理模型</p>
@@ -44,6 +46,7 @@
           <option value="{{ p.id }}" {% if s.llm_provider == p.id %}selected{% endif %}>{{ p.name }}</option>
           {% endfor %}
         </select>
+        <span class="set-dirty" data-for="llm-provider" hidden>已修改但未保存</span>
       </label>
       <div class="set-row">
         <span class="set-label">可选模型
@@ -53,7 +56,12 @@
           <option value="{{ s.llm_model }}" selected>{{ s.llm_model }}</option>
           <option value="__custom__">自定义模型…</option>
         </select>
-        <input type="text" id="llm-model-custom" maxlength="100" autocomplete="off" placeholder="输入模型名后回车" hidden>
+        <span class="model-custom-wrap" id="llm-model-custom-wrap">
+          <input type="text" id="llm-model-custom" maxlength="100" autocomplete="off" placeholder="输入模型名，回车或点「确认」">
+          <button type="button" id="llm-custom-ok" class="btn btn-small">确认</button>
+          <button type="button" id="llm-custom-cancel" class="btn btn-small">取消</button>
+        </span>
+        <span class="set-dirty" data-for="llm-model" hidden>已修改但未保存</span>
       </div>
       <p class="hint" id="model-list-msg"></p>
     </div>
@@ -65,6 +73,7 @@
           <span class="set-hint">本地 Ollama 服务地址由 .env 的 OLLAMA_URL 配置</span>
         </span>
         <input type="text" id="embed-model" value="{{ s.embed_model }}" maxlength="100" autocomplete="off">
+        <span class="set-dirty" data-for="embed-model" hidden>已修改但未保存</span>
       </label>
     </div>
 
@@ -89,27 +98,32 @@
 
   <details class="section" id="retrieval-cfg">
     <summary><h2>检索配置</h2></summary>
-    <p class="hint">偏高级的参数，一般不用动；改完立即生效。</p>
+    <p class="hint">偏高级的参数，一般不用动；修改后需点击「保存设置」才生效。</p>
     <div class="note-item">
       <label class="set-row">
         <span class="set-label">向量召回 Top-K</span>
         <input type="number" id="vector-top-k" value="{{ s.vector_top_k }}" min="1" max="50">
+        <span class="set-dirty" data-for="vector-top-k" hidden>已修改但未保存</span>
       </label>
       <label class="set-row">
         <span class="set-label">关键词召回 Top-K</span>
         <input type="number" id="fts-top-k" value="{{ s.fts_top_k }}" min="1" max="50">
+        <span class="set-dirty" data-for="fts-top-k" hidden>已修改但未保存</span>
       </label>
       <label class="set-row">
         <span class="set-label">融合后取 Top-N</span>
         <input type="number" id="ask-top-n" value="{{ s.ask_top_n }}" min="1" max="50">
+        <span class="set-dirty" data-for="ask-top-n" hidden>已修改但未保存</span>
       </label>
       <label class="set-row">
         <span class="set-label">相似度阈值（低于视为召回不足）</span>
         <input type="number" id="vector-min-sim" value="{{ s.vector_min_sim }}" min="0" max="1" step="0.05">
+        <span class="set-dirty" data-for="vector-min-sim" hidden>已修改但未保存</span>
       </label>
       <label class="set-row">
         <span class="set-label">材料层兜底条数</span>
         <input type="number" id="materials-top-k" value="{{ s.materials_top_k }}" min="1" max="50">
+        <span class="set-dirty" data-for="materials-top-k" hidden>已修改但未保存</span>
       </label>
     </div>
   </details>
@@ -181,22 +195,31 @@
   }
 
   // 可选模型：下拉框按当前提供商拉取（GET /api/settings/models），失败回落内置列表；
-  // 下拉含「自定义模型…」入口（选择后切换为文本输入，回车确认回到下拉并选中该值）
+  // 下拉含「自定义模型…」入口（选择后切换为文本输入 + 确认/取消按钮：回车/点确认提交，
+  // 输入与下拉已有选项（含已获取模型列表）相同时直接复用该选项、不新增条目；取消恢复原选择）
   var modelSel = document.getElementById('llm-model');
+  var modelCustomWrap = document.getElementById('llm-model-custom-wrap');
   var modelCustom = document.getElementById('llm-model-custom');
+  var modelCustomOk = document.getElementById('llm-custom-ok');
+  var modelCustomCancel = document.getElementById('llm-custom-cancel');
   var modelListMsg = document.getElementById('model-list-msg');
+  var DEFAULT_LLM_MODEL = {{ llm_model_default | tojson }};  // .env 默认模型（下拉「（默认值）」标注用）
+  var fetchedModels = [];  // 当前提供商已获取的模型列表
+  var lastModelValue = modelSel.value;  // 进入自定义输入前的下拉值（取消时恢复）
 
   function currentModel() {
-    return modelCustom.hidden ? modelSel.value : modelCustom.value.trim();
+    return modelCustomWrap.classList.contains('show') ? modelCustom.value.trim() : modelSel.value;
   }
 
   function fillModelOptions(models) {
+    fetchedModels = models;
     var current = modelSel.value;
     modelSel.innerHTML = '';
-    if (current && models.indexOf(current) === -1) {
+    if (current && current !== '__custom__' && models.indexOf(current) === -1) {
       var cur = document.createElement('option');
       cur.value = current;
-      cur.textContent = current + '（当前值）';
+      // 当前生效模型不在列表：等于 .env 默认时标「（默认值）」，否则标「（当前值）」
+      cur.textContent = current + (current === DEFAULT_LLM_MODEL ? '（默认值）' : '（当前值）');
       modelSel.appendChild(cur);
     }
     models.forEach(function (m) {
@@ -211,7 +234,8 @@
     modelSel.appendChild(custom);
     modelSel.value = current;
     // 自定义输入中的值未确认时被下拉选中覆盖：保持不回退（若用户正在输入则不打断）
-    if (!modelCustom.hidden) modelSel.value = '__custom__';
+    if (modelCustomWrap.classList.contains('show')) modelSel.value = '__custom__';
+    if (modelSel.value !== '__custom__') lastModelValue = modelSel.value;
   }
 
   function loadModels(provider) {
@@ -234,32 +258,101 @@
       });
   }
 
-  // 「自定义模型…」：切换到文本输入；回车/失焦确认后回到下拉并选中新值
-  modelSel.addEventListener('change', function () {
-    if (modelSel.value !== '__custom__') return;
-    modelCustom.value = '';
-    modelCustom.hidden = false;
-    modelSel.hidden = true;
-    modelCustom.focus();
-  });
-  modelCustom.addEventListener('change', function () {
+  function commitCustomModel() {
     var v = modelCustom.value.trim();
-    if (!v) { modelSel.value = modelSel.options.length ? modelSel.options[0].value : ''; }
-    else {
+    if (!v) {  // 空输入等同取消
+      cancelCustomModel();
+      return;
+    }
+    var exists = false;
+    // 与已获取模型列表相同则直接复用该选项，不新增条目
+    if (fetchedModels.indexOf(v) !== -1) {
+      exists = true;
+    } else {
+      for (var i = 0; i < modelSel.options.length; i++) {
+        if (modelSel.options[i].value === v) { exists = true; break; }
+      }
+    }
+    if (!exists) {
       var opt = document.createElement('option');
       opt.value = v;
       opt.textContent = v;
       modelSel.insertBefore(opt, modelSel.firstChild);
-      modelSel.value = v;
     }
-    modelCustom.hidden = true;
+    modelSel.value = v;
+    lastModelValue = v;
+    modelCustomWrap.classList.remove('show');
     modelSel.hidden = false;
+    updateDirty();
+  }
+
+  function cancelCustomModel() {
+    modelCustomWrap.classList.remove('show');
+    modelSel.hidden = false;
+    modelSel.value = lastModelValue;
+    updateDirty();
+  }
+
+  // 选择「自定义模型…」：显示文本输入 + 确认/取消按钮（回车确认；不再失焦即确认）
+  modelSel.addEventListener('change', function () {
+    if (modelSel.value === '__custom__') {
+      modelCustom.value = '';
+      modelSel.hidden = true;
+      modelCustomWrap.classList.add('show');
+      modelCustom.focus();
+    } else {
+      lastModelValue = modelSel.value;
+    }
+    updateDirty();
   });
+  modelCustom.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitCustomModel();
+    }
+  });
+  modelCustomOk.addEventListener('click', commitCustomModel);
+  modelCustomCancel.addEventListener('click', cancelCustomModel);
 
   document.getElementById('llm-provider').addEventListener('change', function (e) {
     loadModels(e.target.value);
   });
   loadModels(document.getElementById('llm-provider').value);
+
+  // 「已修改但未保存」标注：控件变化即与保存基线（SNAPSHOT）比对，保存成功后重置基线
+  var SNAPSHOT = {};
+  var DIRTY_IDS = ['weekly-llm', 'default-category', 'llm-provider', 'llm-model', 'embed-model',
+                   'vector-top-k', 'fts-top-k', 'ask-top-n', 'vector-min-sim', 'materials-top-k'];
+
+  function fieldValue(id) {
+    if (id === 'llm-model') return currentModel();
+    var el = document.getElementById(id);
+    return el.type === 'checkbox' ? el.checked : el.value;
+  }
+
+  function refreshSnapshot() {
+    DIRTY_IDS.forEach(function (id) { SNAPSHOT[id] = fieldValue(id); });
+  }
+
+  function updateDirty() {
+    var marks = document.querySelectorAll('.set-dirty');
+    var any = false;
+    for (var i = 0; i < marks.length; i++) {
+      var id = marks[i].getAttribute('data-for');
+      var dirty = fieldValue(id) !== SNAPSHOT[id];
+      marks[i].hidden = !dirty;
+      if (dirty) any = true;
+    }
+    return any;
+  }
+
+  DIRTY_IDS.forEach(function (id) {
+    if (id === 'llm-model') return;  // 模型的变化由下拉 change / 自定义输入 input 单独监听
+    document.getElementById(id).addEventListener('change', updateDirty);
+  });
+  modelCustom.addEventListener('input', updateDirty);
+  refreshSnapshot();
+  updateDirty();
 
   // 保存设置（通用 + 模型 + 检索）
   document.getElementById('settings-form').addEventListener('submit', async function (e) {
@@ -289,7 +382,11 @@
       });
       var data = await resp.json().catch(function () { return {}; });
       if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
-      showMsg('设置已保存（立即生效）。');
+      // 保存成功：收拢自定义输入并重置「已修改但未保存」基线
+      if (modelCustomWrap.classList.contains('show')) commitCustomModel();
+      refreshSnapshot();
+      updateDirty();
+      showMsg('设置已保存。');
     } catch (ex) {
       showMsg('保存失败：' + ex.message, true);
     }

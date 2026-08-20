@@ -1149,6 +1149,7 @@ def settings_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLRe
             "app_version": config.APP_VERSION,
             "categories": config.CATEGORIES,
             "providers": providers.options(),
+            "llm_model_default": config.LLM_MODEL,  # 设置页「（默认值）」标注用（§30）
             "s": settings.effective(conn),
         },
     )

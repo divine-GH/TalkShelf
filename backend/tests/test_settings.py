@@ -3,6 +3,8 @@
 - GET /settings：设置页渲染（通用/模型/检索/数据管理/安全/关于区块，服务端渲染生效值）；
 - 模型配置/检索配置默认折叠（<details> 不带 open）；模型配置含对话整理/Ollama/联网搜索三个子块，
   联网搜索模型只读（仅 DeepSeek + 暂不支持修改）；
+- 设置页手动保存流程（§30）：每项带「已修改但未保存」标注、自定义模型含确认/取消按钮、
+  DEFAULT_LLM_MODEL（「（默认值）」标注用）、提示文案不再声称改完立即生效；
 - 顶栏导航：「记录」「检索」「更多功能」三按钮并排一行，其余功能收进折叠菜单；
 - 更名：「笔记」→「浏览笔记」、「问答」→「检索」、「回顾」→「兴趣回顾」；
 - /static 静态资源带 Cache-Control: no-cache（浏览器每次重新校验，UI 改动即时生效）。
@@ -32,13 +34,20 @@ def test_settings_page_html(client):
         'id="llm-provider"',
         'id="llm-model"',
         'id="llm-model-custom"',
+        'id="llm-model-custom-wrap"',
+        'id="llm-custom-ok"',  # 自定义模型「确认」按钮
+        'id="llm-custom-cancel"',  # 自定义模型「取消」按钮
         "__custom__",  # 可选模型下拉含「自定义模型…」入口
         'id="embed-model"',
         'id="search-provider"',
         'id="search-model"',
         "暂不支持修改",
+        'class="set-dirty"',  # 「已修改但未保存」标注
+        'DEFAULT_LLM_MODEL = "deepseek-chat"',  # .env 默认模型（下拉「（默认值）」标注用）
+        "修改后需点击「保存设置」才生效",  # 手动保存提示（不再声称立即生效）
     ):
         assert fragment in resp.text, f"设置页缺少: {fragment}"
+    assert "改完立即生效" not in resp.text, "设置页不应再声称改完立即生效"
     # 模型配置/检索配置默认折叠：<details> 不带 open 属性
     for tag in (
         '<details class="section" id="model-cfg">',

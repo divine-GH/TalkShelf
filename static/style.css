@@ -148,6 +148,7 @@ details.section[open] > summary { margin-bottom: 10px; }
 .set-group-title:first-child { margin-top: 0; }
 .set-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -173,6 +174,22 @@ details.section[open] > summary { margin-bottom: 10px; }
   background: var(--bg);
   cursor: not-allowed;
 }
+/* 设置项「已修改但未保存」标注（设置页手动保存流程） */
+.set-dirty {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+/* 自定义模型输入 + 确认/取消按钮（.show 显示，避免 hidden 与 display 冲突） */
+.model-custom-wrap { display: none; align-items: center; gap: 6px; }
+.model-custom-wrap.show { display: inline-flex; }
+.model-custom-wrap input[type="text"] { max-width: none; }
 
 /* ---- 首页记录入口 ---- */
 .record-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
