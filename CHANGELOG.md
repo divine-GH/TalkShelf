@@ -10,6 +10,32 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.5.0] - 2026-08-20
+
+### Added
+
+- **模型配置重构（设置页）**：模型配置/检索配置改为**默认折叠**（原生 `<details>`，点击展开），
+  解决设置页过长；模型配置拆三个子块：
+  - **对话/整理模型**：模型提供商下拉（7 家 OpenAI 兼容端点：DeepSeek / OpenAI / OpenRouter /
+    Moonshot Kimi / 智谱 GLM / 通义千问 / SiliconFlow）+ 可选模型列表——切换提供商自动调
+    `GET {base}/models`（Bearer .env key）拉取，失败回落内置列表并提示；模型不在列表可直接输入；
+  - **Ollama 模型**：本地 Embedding 模型名（原样保留）；
+  - **联网搜索模型**：固定 DeepSeek（原生 web_search），只读展示 + 「暂不支持修改」提示。
+- **提供商注册表**（`backend/app/providers.py`）：每家含基址、.env key 变量名、内置兜底模型列表；
+  API Key 只从 .env 读（设置页不提供 key 输入框，key 不入库不进 git）；DeepSeek `/models` 已实测
+  可用（返回 deepseek-v4-flash / deepseek-v4-pro），其余提供商为参考实现（同 OpenAI 兼容标准，
+  端点存在性已探测）。
+- **新设置项 `llm_provider`**：settings 表覆盖 .env `LLM_PROVIDER`（默认 deepseek），
+  llm.py 按当前提供商取 base_url + key；缺 key 报错只指出缺失的环境变量名。
+- `GET /api/settings/models?provider=<id>`：拉取指定提供商模型列表（`source=api` 成功 /
+  `fallback` 回落内置列表并附原因 / 未知提供商 422）。
+
+### Changed
+
+- 设置表单不再提交 `search_model`（联网搜索模型暂不支持修改；后端字段保留兼容）。
+- 测试新增 4 个（提供商解析、缺 key 报错、模型列表端点三态、页面折叠与只读断言），
+  全量 120 个 pytest 通过。
+
 ## [0.4.0] - 2026-08-20
 
 ### Added
