@@ -186,6 +186,8 @@ details.section[open] > summary { margin-bottom: 10px; }
   border: 1px solid #d97706;
   cursor: help;
 }
+/* display: inline-block 会覆盖浏览器对 hidden 属性的默认隐藏，必须显式补回（否则圆点恒显示） */
+.set-dirty[hidden] { display: none; }
 /* 自定义模型输入 + 确认/取消按钮（.show 显示，避免 hidden 与 display 冲突） */
 .model-custom-wrap { display: none; align-items: center; gap: 6px; }
 .model-custom-wrap.show { display: inline-flex; }
