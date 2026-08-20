@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
-from . import config
+from . import config, settings
 
 _hasher = PasswordHasher()
 _password_hash_cache: str | None = None  # AUTH_PASSWORD 的 argon2 哈希（进程内缓存，不落库）
@@ -31,10 +31,31 @@ def _hash() -> str:
     return _password_hash_cache
 
 
-def verify_password(password: str) -> bool:
-    """校验登录密码（与配置的 AUTH_PASSWORD 比对）。密码错/未配置都返回 False。"""
+def hash_password(password: str) -> str:
+    """对明文密码做 argon2 哈希（设置页改密码落库用，§28）。"""
+    return _hasher.hash(password)
+
+
+def _db_hash(conn: sqlite3.Connection) -> str | None:
+    """设置页改过的密码哈希（settings 表）；未改过返回 None。"""
+    return settings.get(conn, settings.KEY_AUTH_PASSWORD_HASH)
+
+
+def verify_password(conn: sqlite3.Connection, password: str) -> bool:
+    """校验登录密码：settings 表哈希优先（设置页改过密码后覆盖 .env AUTH_PASSWORD）。
+
+    密码错/未配置都返回 False。conn 来自调用方（login 端点），用于读 settings 覆盖。
+    """
     if not config.auth_enabled():
         return False
+    stored = _db_hash(conn)
+    if stored is not None:
+        try:
+            return _hasher.verify(stored, password)
+        except VerifyMismatchError:
+            return False
+        except Exception:  # noqa: BLE001 —— argon2 校验异常（哈希格式损坏等）按失败处理
+            return False
     try:
         return _hasher.verify(_hash(), password)
     except VerifyMismatchError:

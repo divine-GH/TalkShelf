@@ -3,14 +3,125 @@
 
 {% block content %}
 <h1>设置</h1>
+<p id="settings-msg" class="hint" hidden></p>
+
+<form id="settings-form">
+  <section class="section">
+    <h2>通用</h2>
+    <div class="note-item">
+      <label class="set-row">
+        <span class="set-label">每周总结用 AI 生成
+          <span class="set-hint">关闭后统计页只显示统计文本，省 token、离线可用</span>
+        </span>
+        <input type="checkbox" id="weekly-llm" {% if s.weekly_llm %}checked{% endif %}>
+      </label>
+      <label class="set-row">
+        <span class="set-label">默认分类
+          <span class="set-hint">直存（待整理）笔记立即打上的分类，LLM 补整理后以 LLM 为准</span>
+        </span>
+        <select id="default-category">
+          <option value="">不启用</option>
+          {% for cat in categories %}
+          <option value="{{ cat }}" {% if s.default_category == cat %}selected{% endif %}>{{ cat }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>模型配置</h2>
+    <p class="hint">改完立即生效；模型名须与对应服务商一致（DeepSeek / Ollama）。</p>
+    <div class="note-item">
+      <label class="set-row">
+        <span class="set-label">对话/整理模型</span>
+        <input type="text" id="llm-model" value="{{ s.llm_model }}" maxlength="100" autocomplete="off">
+      </label>
+      <label class="set-row">
+        <span class="set-label">Embedding 模型</span>
+        <input type="text" id="embed-model" value="{{ s.embed_model }}" maxlength="100" autocomplete="off">
+      </label>
+      <label class="set-row">
+        <span class="set-label">联网搜索模型</span>
+        <input type="text" id="search-model" value="{{ s.search_model }}" maxlength="100" autocomplete="off">
+      </label>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>检索配置</h2>
+    <p class="hint">偏高级的参数，一般不用动；改完立即生效。</p>
+    <div class="note-item">
+      <label class="set-row">
+        <span class="set-label">向量召回 Top-K</span>
+        <input type="number" id="vector-top-k" value="{{ s.vector_top_k }}" min="1" max="50">
+      </label>
+      <label class="set-row">
+        <span class="set-label">关键词召回 Top-K</span>
+        <input type="number" id="fts-top-k" value="{{ s.fts_top_k }}" min="1" max="50">
+      </label>
+      <label class="set-row">
+        <span class="set-label">融合后取 Top-N</span>
+        <input type="number" id="ask-top-n" value="{{ s.ask_top_n }}" min="1" max="50">
+      </label>
+      <label class="set-row">
+        <span class="set-label">相似度阈值（低于视为召回不足）</span>
+        <input type="number" id="vector-min-sim" value="{{ s.vector_min_sim }}" min="0" max="1" step="0.05">
+      </label>
+      <label class="set-row">
+        <span class="set-label">材料层兜底条数</span>
+        <input type="number" id="materials-top-k" value="{{ s.materials_top_k }}" min="1" max="50">
+      </label>
+    </div>
+  </section>
+
+  <p><button type="submit" class="btn btn-primary">保存设置</button></p>
+</form>
 
 <section class="section">
-  <h2>通用</h2>
-  <p class="hint">设置功能正在规划中，暂时没有可配置的选项，敬请期待。</p>
+  <h2>数据管理</h2>
   <div class="note-item">
-    <p class="empty">这里以后会放：每周总结开关、默认分类、模型与检索相关配置等。</p>
+    <div class="set-row">
+      <span class="set-label">清空检索记录<span class="set-hint">删除 /ask 页面保存的全部历史提问</span></span>
+      <button type="button" id="clear-history-btn" class="btn btn-danger btn-small">清空</button>
+    </div>
+    <div class="set-row">
+      <span class="set-label">补处理失败的笔记<span class="set-hint">重新整理失败的笔记（status=failed），可重试</span></span>
+      <span id="failed-count" class="hint"></span>
+    </div>
+    <ul id="failed-list" class="draft-list"></ul>
   </div>
 </section>
+
+{% if auth_enabled %}
+<section class="section">
+  <h2>修改登录密码</h2>
+  <div class="note-item">
+    <div class="set-row">
+      <span class="set-label">当前密码</span>
+      <input type="password" id="old-password" autocomplete="current-password">
+    </div>
+    <div class="set-row">
+      <span class="set-label">新密码（至少 8 位）</span>
+      <input type="password" id="new-password" autocomplete="new-password">
+    </div>
+    <div class="set-row">
+      <span class="set-label">确认新密码</span>
+      <input type="password" id="confirm-password" autocomplete="new-password">
+    </div>
+    <p class="error" id="password-error" hidden></p>
+    <p><button type="button" id="password-btn" class="btn">修改密码</button></p>
+    {% if s.password_set %}
+    <p class="hint">已通过设置页修改过密码（优先于 .env 的 AUTH_PASSWORD）。</p>
+    {% endif %}
+  </div>
+</section>
+{% else %}
+<section class="section">
+  <h2>修改登录密码</h2>
+  <p class="hint">登录未启用：在 .env 配置 AUTH_PASSWORD 后即可在此修改密码。</p>
+</section>
+{% endif %}
 
 <section class="section">
   <h2>关于</h2>
@@ -19,4 +130,132 @@
     <p class="note-meta">当前版本 v{{ app_version }}</p>
   </div>
 </section>
+{% endblock %}
+
+{% block script %}
+<script>
+  var msgBox = document.getElementById('settings-msg');
+  function showMsg(text, isError) {
+    msgBox.textContent = text;
+    msgBox.classList.toggle('error', !!isError);
+    msgBox.hidden = false;
+  }
+
+  // 保存设置（通用 + 模型 + 检索）
+  document.getElementById('settings-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var body = {
+      weekly_llm: document.getElementById('weekly-llm').checked,
+      default_category: document.getElementById('default-category').value,
+      llm_model: document.getElementById('llm-model').value.trim(),
+      embed_model: document.getElementById('embed-model').value.trim(),
+      search_model: document.getElementById('search-model').value.trim(),
+      vector_top_k: parseInt(document.getElementById('vector-top-k').value, 10),
+      fts_top_k: parseInt(document.getElementById('fts-top-k').value, 10),
+      ask_top_n: parseInt(document.getElementById('ask-top-n').value, 10),
+      vector_min_sim: parseFloat(document.getElementById('vector-min-sim').value),
+      materials_top_k: parseInt(document.getElementById('materials-top-k').value, 10)
+    };
+    try {
+      var resp = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+      var data = await resp.json().catch(function () { return {}; });
+      if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+      showMsg('设置已保存（立即生效）。');
+    } catch (ex) {
+      showMsg('保存失败：' + ex.message, true);
+    }
+  });
+
+  // 清空检索记录
+  document.getElementById('clear-history-btn').addEventListener('click', async function () {
+    if (!confirm('确定清空全部检索记录？此操作不可恢复。')) return;
+    try {
+      var resp = await fetch('/api/settings/clear-search-history', {method: 'POST'});
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      showMsg('已清空 ' + data.deleted + ' 条检索记录。');
+    } catch (ex) {
+      showMsg('清空失败：' + ex.message, true);
+    }
+  });
+
+  // 补处理失败的笔记：列表 + 重试（复用 /api/notes/{id}/reprocess）
+  var failedList = document.getElementById('failed-list');
+  var failedCount = document.getElementById('failed-count');
+  async function loadFailed() {
+    try {
+      var resp = await fetch('/api/settings/failed-notes');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      failedCount.textContent = data.items.length ? ('共 ' + data.items.length + ' 条（仅显示最近 50 条）') : '无失败笔记';
+      failedList.innerHTML = '';
+      data.items.forEach(function (n) {
+        var li = document.createElement('li');
+        li.className = 'draft-item';
+        var preview = document.createElement('span');
+        preview.className = 'draft-link draft-preview';
+        preview.textContent = '#' + n.id + ' ' + (n.title || n.raw || '').slice(0, 60);
+        var btn = document.createElement('button');
+        btn.className = 'btn btn-small';
+        btn.textContent = '重试';
+        btn.addEventListener('click', async function () {
+          btn.disabled = true;
+          try {
+            var r = await fetch('/api/notes/' + n.id + '/reprocess', {method: 'POST'});
+            if (!r.ok) throw new Error((await r.json().catch(function () { return {}; })).detail || ('HTTP ' + r.status));
+            showMsg('笔记 #' + n.id + ' 已重新入队整理。');
+            loadFailed();
+          } catch (ex) {
+            showMsg('重试失败：' + ex.message, true);
+            btn.disabled = false;
+          }
+        });
+        li.appendChild(preview);
+        li.appendChild(btn);
+        failedList.appendChild(li);
+      });
+    } catch (ex) {
+      failedCount.textContent = '加载失败：' + ex.message;
+    }
+  }
+  loadFailed();
+
+  // 修改登录密码
+  var pwdBtn = document.getElementById('password-btn');
+  if (pwdBtn) {
+    pwdBtn.addEventListener('click', async function () {
+      var oldPwd = document.getElementById('old-password').value;
+      var newPwd = document.getElementById('new-password').value;
+      var confirmPwd = document.getElementById('confirm-password').value;
+      var errBox = document.getElementById('password-error');
+      errBox.hidden = true;
+      if (!oldPwd) { errBox.textContent = '请输入当前密码'; errBox.hidden = false; return; }
+      if (newPwd !== confirmPwd) { errBox.textContent = '两次输入的新密码不一致'; errBox.hidden = false; return; }
+      if (newPwd.length < 8) { errBox.textContent = '新密码至少 8 位'; errBox.hidden = false; return; }
+      pwdBtn.disabled = true;
+      try {
+        var resp = await fetch('/api/settings/password', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({old_password: oldPwd, new_password: newPwd})
+        });
+        var data = await resp.json().catch(function () { return {}; });
+        if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+        showMsg('密码已修改（下次登录使用新密码）。');
+        document.getElementById('old-password').value = '';
+        document.getElementById('new-password').value = '';
+        document.getElementById('confirm-password').value = '';
+      } catch (ex) {
+        errBox.textContent = '修改失败：' + ex.message;
+        errBox.hidden = false;
+      } finally {
+        pwdBtn.disabled = false;
+      }
+    });
+  }
+</script>
 {% endblock %}

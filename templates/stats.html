@@ -90,7 +90,12 @@
       pre.className = 'detail-content weekly-text';
       pre.textContent = data.summary;
       box.appendChild(pre);
-      if (data.degraded) {
+      if (data.llm === false) {
+        const hint = document.createElement('p');
+        hint.className = 'hint';
+        hint.textContent = '（已关闭 AI 周报，显示统计结果；可在设置页开启）';
+        box.appendChild(hint);
+      } else if (data.degraded) {
         const hint = document.createElement('p');
         hint.className = 'hint';
         hint.textContent = '（AI 总结暂不可用，以上为统计降级结果）';

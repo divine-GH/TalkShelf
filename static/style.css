@@ -132,6 +132,29 @@ textarea:focus, input:focus { outline: 2px solid var(--primary); outline-offset:
 .error { color: var(--danger); font-size: 0.9rem; margin: 8px 0 0; }
 .empty { color: var(--muted); }
 
+/* ---- 设置页（§28） ---- */
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+}
+.set-row + .set-row { border-top: 1px dashed var(--border); }
+.set-label { flex: 1; min-width: 0; }
+.set-hint { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
+.set-row input[type="text"], .set-row input[type="number"], .set-row input[type="password"], .set-row select {
+  width: auto;
+  min-width: 150px;
+  max-width: 45%;
+  padding: 8px 10px;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.set-row input[type="checkbox"] { width: 22px; height: 22px; flex-shrink: 0; }
+
 /* ---- 首页记录入口 ---- */
 .record-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .record-form textarea { font-size: 1.05rem; }

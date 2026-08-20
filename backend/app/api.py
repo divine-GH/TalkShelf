@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from . import auth, config, db, fetch, llm, notes, retrieval, web_search
+from . import auth, config, db, fetch, llm, notes, retrieval, settings, web_search
 from . import queue as queue_mod
 
 logger = logging.getLogger(__name__)
@@ -750,9 +750,20 @@ def stats(conn: ConnDep, _auth: ApiAuthDep) -> dict:
     return {"total": total, "by_category": by_category, "top_tags": top_tags, "by_month": by_month}
 
 
+def _weekly_stats_text(conn: sqlite3.Connection, note_count: int) -> str:
+    """纯统计周报文本（LLM 关闭/失败降级共用，§28）。"""
+    cat_lines = "、".join(
+        f"{c['category']} {c['count']} 条" for c in stats(conn, _auth=None)["by_category"]
+    )
+    return f"本周共记录 {note_count} 条笔记" + (f"（{cat_lines}）" if cat_lines else "") + "。"
+
+
 @router.post("/api/weekly")
 def weekly_summary_api(conn: ConnDep, _auth: ApiAuthDep) -> dict:
-    """本周总结（§5，M3 拍板）：LLM 基于近 7 天笔记生成中文周报；失败降级纯统计文本。"""
+    """本周总结（§5，M3 拍板；§28 起可关）：LLM 基于近 7 天笔记生成中文周报；失败降级纯统计文本。
+
+    设置页「每周总结用 AI 生成」关闭时直接返回纯统计（省 token、离线可用），llm=False。
+    """
     rows = conn.execute(
         "SELECT * FROM notes WHERE status != 'merged' "
         "AND created_at >= datetime('now', 'localtime', '-7 days') ORDER BY created_at"
@@ -770,18 +781,25 @@ def weekly_summary_api(conn: ConnDep, _auth: ApiAuthDep) -> dict:
         for r in rows
     ]
     note_count = len(notes_list)
+    if not settings.get_bool(conn, settings.KEY_WEEKLY_LLM, True):
+        # 已关闭 AI 周报：不调 LLM，直接纯统计（§28）
+        return {
+            "summary": _weekly_stats_text(conn, note_count),
+            "note_count": note_count,
+            "degraded": False,
+            "llm": False,
+        }
     try:
         summary = llm.weekly_summary(notes_list)
-        return {"summary": summary, "note_count": note_count, "degraded": False}
+        return {"summary": summary, "note_count": note_count, "degraded": False, "llm": True}
     except llm.LLMError as e:
         logger.warning("每周总结生成失败，降级纯统计: %s", e)
-        cat_lines = "、".join(
-            f"{c['category']} {c['count']} 条" for c in stats(conn, _auth=None)["by_category"]
-        )
-        summary = (
-            f"本周共记录 {note_count} 条笔记" + (f"（{cat_lines}）" if cat_lines else "") + "。"
-        )
-        return {"summary": summary, "note_count": note_count, "degraded": True}
+        return {
+            "summary": _weekly_stats_text(conn, note_count),
+            "note_count": note_count,
+            "degraded": True,
+            "llm": True,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -835,6 +853,120 @@ def search_history_delete(record_id: int, conn: ConnDep, _auth: ApiAuthDep) -> R
 
 
 # ---------------------------------------------------------------------------
+# 设置端点（设计文档 §28：settings 表键值覆盖 .env 默认值，改完立即生效、重启不丢）
+# ---------------------------------------------------------------------------
+
+# PUT /api/settings 允许的键 → 类型（None 表示恢复默认 = 删除覆盖行）
+SETTINGS_FIELDS: dict[str, type] = {
+    "weekly_llm": bool,
+    "default_category": str,
+    "llm_model": str,
+    "embed_model": str,
+    "search_model": str,
+    "vector_top_k": int,
+    "fts_top_k": int,
+    "ask_top_n": int,
+    "vector_min_sim": float,
+    "materials_top_k": int,
+}
+
+
+def _settings_payload(conn: sqlite3.Connection) -> dict:
+    """GET /api/settings 与设置页共用的响应体（生效值 + 元信息）。"""
+    return {
+        **settings.effective(conn),
+        "categories": config.CATEGORIES,
+        "app_version": config.APP_VERSION,
+    }
+
+
+def _validate_setting(key: str, value: object) -> None:
+    """单键取值校验；非法抛 HTTPException(422)。"""
+    if key == "weekly_llm":
+        if not isinstance(value, bool):
+            raise HTTPException(status_code=422, detail="weekly_llm 须为布尔值")
+    elif key == "default_category":
+        if not (value == "" or value in config.CATEGORIES):
+            raise HTTPException(status_code=422, detail=f"default_category 不在分类体系内: {value}")
+    elif key in ("llm_model", "embed_model", "search_model"):
+        if not isinstance(value, str) or not value.strip() or len(value) > 100:
+            raise HTTPException(status_code=422, detail=f"{key} 须为 1~100 字符的模型名")
+    elif key in ("vector_top_k", "fts_top_k", "ask_top_n", "materials_top_k"):
+        if type(value) is not int or not (1 <= value <= 50):
+            raise HTTPException(status_code=422, detail=f"{key} 须为 1~50 的整数")
+    elif key == "vector_min_sim":
+        bad = (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not (0.0 <= value <= 1.0)
+        )
+        if bad:
+            raise HTTPException(status_code=422, detail="vector_min_sim 须为 0~1 的数字")
+
+
+@router.get("/api/settings")
+def get_settings(conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """当前生效设置（DB 覆盖 + .env 默认值）+ 分类体系 + 版本。"""
+    return _settings_payload(conn)
+
+
+@router.put("/api/settings")
+def put_settings(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """更新设置：键白名单校验，value=None 恢复默认（删除覆盖行），其余按类型校验后落库。
+
+    部分更新（只传要改的键）；改完立即生效（各使用点实时读表），无需重启。
+    """
+    unknown = set(body) - set(SETTINGS_FIELDS)
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"不支持的设置项: {', '.join(sorted(unknown))}")
+    for key, value in body.items():
+        if value is None:
+            settings.delete(conn, key)  # 恢复默认
+            continue
+        _validate_setting(key, value)
+        # 布尔值规范化为 "1"/"0" 存储（str(True)="True" 与读取侧解析不一致）
+        settings.set_value(
+            conn, key, "1" if value is True else "0" if value is False else str(value)
+        )
+    conn.commit()
+    return _settings_payload(conn)
+
+
+@router.post("/api/settings/clear-search-history")
+def clear_search_history(conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """清空检索记录（数据管理）。返回删除条数。"""
+    cur = conn.execute("DELETE FROM search_history")
+    conn.commit()
+    return {"deleted": cur.rowcount}
+
+
+@router.get("/api/settings/failed-notes")
+def failed_notes(conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """补处理失败（status='failed'）的笔记列表（数据管理：查看 + 重试入口）。"""
+    rows = conn.execute(
+        "SELECT id, title, raw, created_at FROM notes WHERE status = 'failed' "
+        "ORDER BY id DESC LIMIT 50"
+    ).fetchall()
+    return {"items": [dict(r) for r in rows]}
+
+
+@router.post("/api/settings/password")
+def change_password(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """修改登录密码（§28）：校验当前密码 → 新密码 argon2 哈希落 settings 表（优先于 .env AUTH_PASSWORD）。"""
+    if not config.auth_enabled():
+        raise HTTPException(status_code=422, detail="未启用登录（.env 配置 AUTH_PASSWORD 后可用）")
+    old = body.get("old_password") or ""
+    new = body.get("new_password") or ""
+    if not auth.verify_password(conn, old):
+        raise HTTPException(status_code=401, detail="当前密码错误")
+    if len(new) < 8:
+        raise HTTPException(status_code=422, detail="新密码至少 8 位")
+    settings.set_value(conn, settings.KEY_AUTH_PASSWORD_HASH, auth.hash_password(new))
+    conn.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # 登录端点（设计文档 §9 + M3 拍板 §24：AUTH_PASSWORD 配置即全局启用）
 # ---------------------------------------------------------------------------
 
@@ -854,7 +986,7 @@ def login(body: dict, conn: ConnDep, response: Response) -> dict:
             detail=f"登录失败次数过多，已锁定，请 {auth.lock_remaining_seconds(conn)} 秒后再试",
         )
     password = body.get("password") or ""
-    if not auth.verify_password(password):
+    if not auth.verify_password(conn, password):
         auth.record_failure(conn)
         conn.commit()
         raise HTTPException(status_code=401, detail="密码错误")
@@ -979,10 +1111,17 @@ def stats_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLRespo
 
 
 @router.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request, _sess: PageAuthDep) -> HTMLResponse:
-    """设置页（占位符：暂无实际设置项，仅展示关于/版本信息）。"""
+def settings_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLResponse:
+    """设置页（§28：通用/模型/检索/数据管理/安全/关于；服务端渲染当前生效值）。"""
     return render(
-        request, "settings.html", {"active": "settings", "app_version": config.APP_VERSION}
+        request,
+        "settings.html",
+        {
+            "active": "settings",
+            "app_version": config.APP_VERSION,
+            "categories": config.CATEGORIES,
+            "s": settings.effective(conn),
+        },
     )
 
 
