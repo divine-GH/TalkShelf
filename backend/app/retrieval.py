@@ -16,7 +16,7 @@ import sqlite3
 
 import numpy as np
 
-from . import config, db, embedding
+from . import config, db, embedding, settings
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +153,13 @@ def retrieve(conn: sqlite3.Connection, query: str) -> dict:
     if not query:
         return {"notes": [], "materials": [], "vector_ok": True, "weak_recall": True}
 
+    # 检索参数（§28：设置页可改，DB 覆盖 .env 默认值；改动立即生效）
+    vector_top_k = settings.get_int(conn, settings.KEY_VECTOR_TOP_K, config.VECTOR_TOP_K)
+    fts_top_k = settings.get_int(conn, settings.KEY_FTS_TOP_K, config.FTS_TOP_K)
+    ask_top_n = settings.get_int(conn, settings.KEY_ASK_TOP_N, config.ASK_TOP_N)
+    vector_min_sim = settings.get_float(conn, settings.KEY_VECTOR_MIN_SIM, config.VECTOR_MIN_SIM)
+    materials_top_k = settings.get_int(conn, settings.KEY_MATERIALS_TOP_K, config.MATERIALS_TOP_K)
+
     # 1. 向量召回（Ollama 不可用整路跳过，§7 / §14 第 8 条）
     vector_ok = False
     vector_hits: list[int] = []
@@ -162,25 +169,25 @@ def retrieve(conn: sqlite3.Connection, query: str) -> dict:
         vectors = embedding.load_all_embeddings(conn)
         if vectors:
             vector_ok = True
-            scored = embedding.cosine_top_k(qvec, vectors, config.VECTOR_TOP_K)
+            scored = embedding.cosine_top_k(qvec, vectors, vector_top_k)
             vector_hits = [nid for nid, _ in scored]
             top1_sim = scored[0][1] if scored else 0.0
     except embedding.EmbeddingError as e:
         logger.info("向量检索不可用（%s），降级 FTS-only", e)
 
     # 2. FTS 关键词召回
-    fts_hits = fts_search(conn, query, config.FTS_TOP_K)
+    fts_hits = fts_search(conn, query, fts_top_k)
 
     # 3. RRF 融合取 Top-N
-    fused = _rrf_fuse([vector_hits, fts_hits], k=config.RRF_K)[: config.ASK_TOP_N]
+    fused = _rrf_fuse([vector_hits, fts_hits], k=config.RRF_K)[:ask_top_n]
 
-    # 4. 材料层兜底（§7 触发条件：Top-1 相似度 < 0.4 或 FTS 无命中）
+    # 4. 材料层兜底（§7 触发条件：Top-1 相似度 < 阈值或 FTS 无命中）
     materials: list[dict] = []
-    need_fallback = (vector_ok and top1_sim < config.VECTOR_MIN_SIM) or not fts_hits
+    need_fallback = (vector_ok and top1_sim < vector_min_sim) or not fts_hits
     if need_fallback:
-        materials = materials_fts_search(conn, query, config.MATERIALS_TOP_K)
+        materials = materials_fts_search(conn, query, materials_top_k)
 
-    weak_recall = (vector_ok and top1_sim < config.VECTOR_MIN_SIM) or not fused
+    weak_recall = (vector_ok and top1_sim < vector_min_sim) or not fused
     return {
         "notes": _note_hits_to_sources(conn, fused),
         "materials": _material_hits_to_sources(materials),

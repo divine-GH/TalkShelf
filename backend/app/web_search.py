@@ -18,7 +18,7 @@ import urllib.parse
 
 import httpx
 
-from . import config
+from . import config, settings
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def search(query: str) -> list[dict]:
     if not config.DEEPSEEK_API_KEY:
         raise SearchError("DEEPSEEK_API_KEY 未配置")
     body = {
-        "model": config.SEARCH_MODEL,
+        "model": settings.resolve_str(settings.KEY_SEARCH_MODEL, config.SEARCH_MODEL),
         "max_tokens": config.SEARCH_MAX_TOKENS,
         "messages": [
             {

@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import sqlite3
 
-from . import config, db, llm
+from . import config, db, llm, settings
 
 _FETCHED_URL_RE = re.compile(r"^Fetched (\S+)")
 _MD_LINK_RE = re.compile(r"\]\((https?://[^)\s]+)\)")
@@ -128,9 +128,13 @@ def confirm_conversation(
 
     # 普通对话：写入新笔记
     status = "processed" if organized else "pending"
+    # 直存（未整理）模式：打上设置页配置的默认分类兜底（§28），LLM 补整理后以 LLM 分类为准
+    fallback_cat = (
+        settings.get_str(conn, settings.KEY_DEFAULT_CATEGORY, "") or None if not organized else None
+    )
     cur = conn.execute(
-        "INSERT INTO notes(raw, kind, status, source_url) VALUES (?, ?, ?, ?)",
-        (user_text, kind, status, (organized or {}).get("source_url")),
+        "INSERT INTO notes(raw, kind, status, source_url, category) VALUES (?, ?, ?, ?, ?)",
+        (user_text, kind, status, (organized or {}).get("source_url"), fallback_cat),
     )
     note_id = cur.lastrowid
     if organized:
@@ -152,7 +156,12 @@ def create_note_direct(conn: sqlite3.Connection, raw: str, kind: str) -> dict:
     202 返回 + 异步补做（LLM 整理 + 查重）；同时归档一条对话便于追溯。
     """
     raw = raw.strip()
-    cur = conn.execute("INSERT INTO notes(raw, kind, status) VALUES (?, ?, 'pending')", (raw, kind))
+    # 直存笔记打上设置页配置的默认分类兜底（§28）；LLM 补整理后以 LLM 分类为准
+    fallback_cat = settings.get_str(conn, settings.KEY_DEFAULT_CATEGORY, "") or None
+    cur = conn.execute(
+        "INSERT INTO notes(raw, kind, status, category) VALUES (?, ?, 'pending', ?)",
+        (raw, kind, fallback_cat),
+    )
     note_id = cur.lastrowid
     db.fts_sync(conn, note_id)  # 直存也可检索（§14 第 5 条）
     conv_cur = conn.execute(

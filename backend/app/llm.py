@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from . import config
+from . import config, settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,11 @@ SCHEMA_HINT = (
 )
 
 CATEGORY_HINT = "；".join(f"{k}：{v}" for k, v in config.CATEGORIES.items())
+
+
+def _llm_model() -> str:
+    """当前生效的对话/整理模型（设置页可改，§28；未改回落 .env LLM_MODEL）。"""
+    return settings.resolve_str(settings.KEY_LLM_MODEL, config.LLM_MODEL)
 
 
 class LLMError(Exception):
@@ -52,7 +57,7 @@ def _call_chat(
     if not config.DEEPSEEK_API_KEY:
         raise LLMError("DEEPSEEK_API_KEY 未配置")
     body: dict[str, Any] = {
-        "model": config.LLM_MODEL,
+        "model": _llm_model(),
         "messages": messages,
         "temperature": 0,
         "stream": False,
@@ -89,7 +94,7 @@ def _chat_with_tools(
     if not config.DEEPSEEK_API_KEY:
         raise LLMError("DEEPSEEK_API_KEY 未配置")
     body: dict[str, Any] = {
-        "model": config.LLM_MODEL,
+        "model": _llm_model(),
         "messages": messages,
         "temperature": 0,
         "stream": False,

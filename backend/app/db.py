@@ -116,6 +116,13 @@ CREATE TABLE IF NOT EXISTS search_history (
     answer      TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+
+-- 运行时设置（§28：设置页可改的键值对；覆盖 config 的 .env 默认值，改完立即生效、重启不丢）
+CREATE TABLE IF NOT EXISTS settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
 """
 
 

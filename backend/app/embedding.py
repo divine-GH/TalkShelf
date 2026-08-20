@@ -14,7 +14,7 @@ import sqlite3
 import httpx
 import numpy as np
 
-from . import config, db
+from . import config, db, settings
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +23,16 @@ class EmbeddingError(Exception):
     """Ollama embedding 调用失败（网络/HTTP/模型缺失）。调用方按降级策略处理。"""
 
 
+def _embed_model() -> str:
+    """当前生效的 embedding 模型（设置页可改，§28；未改回落 .env EMBED_MODEL）。"""
+    return settings.resolve_str(settings.KEY_EMBED_MODEL, config.EMBED_MODEL)
+
+
 def embed_texts(texts: list[str]) -> list[list[float]]:
     """调 Ollama 批量计算 embedding。失败一律抛 EmbeddingError。"""
     if not texts:
         return []
-    body = {"model": config.EMBED_MODEL, "input": texts}
+    body = {"model": _embed_model(), "input": texts}
     try:
         with httpx.Client(timeout=config.EMBED_TIMEOUT) as client:
             resp = client.post(f"{config.OLLAMA_URL}/api/embed", json=body)
