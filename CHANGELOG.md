@@ -10,14 +10,22 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
-## [Unreleased]
+## [0.4.0] - 2026-08-20
 
 ### Added
 
+- **设置页**：`/settings` 从占位页落地为完整设置页（设计文档 §28）——
+  - **通用**：每周总结用 AI 生成开关（关闭后统计页只显示统计文本，省 token、离线可用）、
+    默认分类（直存/待整理笔记立即打上兜底分类，LLM 补整理后以 LLM 为准）；
+  - **模型配置**：对话/整理模型、Embedding 模型、联网搜索模型名；
+  - **检索配置**：向量/关键词召回 Top-K、融合取 Top-N、相似度阈值、材料兜底条数；
+  - **数据管理**：清空检索记录、补处理失败（failed）笔记列表与重试（复用 reprocess）；
+  - **修改登录密码**：argon2 哈希落库（settings 表），优先于 `.env` 的 `AUTH_PASSWORD`；
+  - 全部设置存 SQLite `settings` 键值表，**改完立即生效、重启不丢**，`.env` 值作默认兜底
+    （`GET/PUT /api/settings`，登录启用时走鉴权 + CSRF）。
 - **检索记录**：检索页（/ask）提问结果下方新增历史记录——提问成功自动保存（问题 + 答案 + 时间），
   默认上限 50 条（`.env` 可配 `SEARCH_HISTORY_LIMIT`），超出自动删除最早记录；点击历史问题可再次提问，
   每条可单独删除（`GET /api/search-history` / `DELETE /api/search-history/{id}`）。
-- **设置页（占位）**：`/settings` 占位页（关于/版本信息），入口在顶栏「更多功能」折叠菜单；与其它页面一样受登录保护。
 - **版本管理基础设施**：`CHANGELOG.md`（本文件）+ git tag（v0.1.0/v0.2.0/v0.3.0）+ `config.APP_VERSION` +
   `GET /api/version`（免登录，部署探活 / 确认线上版本用）。
 - **开发工具链**：引入 ruff（lint `ruff check` + format `ruff format`，配置见 `ruff.toml`，默认规则集 + line-length 100）；
@@ -34,6 +42,8 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
   「更多功能」按钮点击无反应且样式不生效的问题（§26.4 根因）。
 - **「更多功能」下拉样式收敛**：扁平卡片风（微阴影 + 1px 边框 + 12px 圆角，与全局一致）；
   按钮加 `appearance: none` 重置默认外观（iOS Safari 等不再显示原生按钮样式）。
+- **每周总结响应结构**：`POST /api/weekly` 新增 `llm` 字段（关闭 AI 周报时 `false`），
+  统计页区分「已关闭」与「AI 降级」两种提示。
 
 ### Fixed
 
