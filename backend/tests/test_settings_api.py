@@ -13,7 +13,7 @@ import re
 import sqlite3
 
 import pytest
-from app import auth, config, embedding, llm, retrieval, settings
+from app import auth, config, embedding, llm, providers, retrieval, settings
 from conftest import start_conversation, wait_for
 
 
@@ -45,6 +45,7 @@ def test_get_settings_defaults(client):
     data = client.get("/api/settings").json()
     assert data["weekly_llm"] is True
     assert data["default_category"] == ""
+    assert data["llm_provider"] == config.LLM_PROVIDER
     assert data["llm_model"] == config.LLM_MODEL
     assert data["embed_model"] == config.EMBED_MODEL
     assert data["search_model"] == config.SEARCH_MODEL
@@ -64,7 +65,8 @@ def test_put_settings_update_and_reset(client):
         json={
             "weekly_llm": False,
             "default_category": "工作",
-            "llm_model": "deepseek-reasoner",
+            "llm_provider": "openai",
+            "llm_model": "gpt-4o",
             "vector_top_k": 3,
             "vector_min_sim": 0.3,
         },
@@ -73,13 +75,17 @@ def test_put_settings_update_and_reset(client):
     data = resp.json()
     assert data["weekly_llm"] is False
     assert data["default_category"] == "工作"
-    assert data["llm_model"] == "deepseek-reasoner"
+    assert data["llm_provider"] == "openai"
+    assert data["llm_model"] == "gpt-4o"
     assert data["vector_top_k"] == 3
     assert data["vector_min_sim"] == 0.3
     # 部分更新 + None 恢复默认（未重置的保持）
-    data = client.put("/api/settings", json={"vector_top_k": None, "llm_model": None}).json()
+    data = client.put(
+        "/api/settings", json={"vector_top_k": None, "llm_model": None, "llm_provider": None}
+    ).json()
     assert data["vector_top_k"] == config.VECTOR_TOP_K
     assert data["llm_model"] == config.LLM_MODEL
+    assert data["llm_provider"] == config.LLM_PROVIDER
     assert data["default_category"] == "工作"
     assert data["weekly_llm"] is False
 
@@ -88,6 +94,7 @@ def test_put_settings_validation(client):
     cases = [
         {"nope": 1},  # 未知键
         {"default_category": "不存在的分类"},
+        {"llm_provider": "不存在的提供商"},
         {"vector_top_k": 0},
         {"vector_top_k": "abc"},
         {"vector_min_sim": 2},
@@ -178,6 +185,50 @@ def test_model_override_resolution(client):
     assert settings.resolve_str(settings.KEY_LLM_MODEL, config.LLM_MODEL) == "deepseek-reasoner"
     client.put("/api/settings", json={"llm_model": None})
     assert settings.resolve_str(settings.KEY_LLM_MODEL, config.LLM_MODEL) == config.LLM_MODEL
+
+
+def test_llm_provider_resolution(client, monkeypatch):
+    """llm_provider 覆盖后，llm 层实际按新提供商取 base_url 与 key（§29）。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+    client.put("/api/settings", json={"llm_provider": "openai"})
+    assert settings.resolve_str(settings.KEY_LLM_PROVIDER, config.LLM_PROVIDER) == "openai"
+    p = llm._llm_provider()
+    assert p.id == "openai"
+    assert p.base_url == "https://api.openai.com/v1"
+    assert providers.api_key(p) == "sk-openai-test"
+    # 恢复默认回落 DeepSeek
+    client.put("/api/settings", json={"llm_provider": None})
+    assert llm._llm_provider().id == config.LLM_PROVIDER
+
+
+def test_llm_provider_missing_key_error(client, monkeypatch):
+    """切换提供商但 .env 无对应 key 时，报错信息指出缺失的环境变量名（不暴露任何值）。"""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    client.put("/api/settings", json={"llm_provider": "openai"})
+    with pytest.raises(llm.LLMError) as ei:
+        llm._call_chat([{"role": "user", "content": "hi"}])
+    assert "OPENAI_API_KEY" in str(ei.value)
+
+
+def test_settings_models_endpoint(client, monkeypatch):
+    """GET /api/settings/models：成功 source=api；失败回落内置列表 source=fallback；未知提供商 422。"""
+    monkeypatch.setattr(providers, "fetch_models", lambda pid: ["m-a", "m-b"])
+    data = client.get("/api/settings/models?provider=openai").json()
+    assert data["provider"] == "openai"
+    assert data["provider_name"] == "OpenAI"
+    assert data["models"] == ["m-a", "m-b"]
+    assert data["source"] == "api"
+
+    def boom(pid):
+        raise providers.ProviderError("无 key")
+
+    monkeypatch.setattr(providers, "fetch_models", boom)
+    data = client.get("/api/settings/models?provider=zhipu").json()
+    assert data["source"] == "fallback"
+    assert data["models"] == list(providers.get("zhipu").fallback_models)
+    assert "无 key" in data["detail"]
+
+    assert client.get("/api/settings/models?provider=nope").status_code == 422
 
 
 def test_retrieval_params_override(client, llm_ok, db_path, monkeypatch):

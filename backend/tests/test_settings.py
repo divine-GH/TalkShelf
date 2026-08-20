@@ -1,6 +1,8 @@
-"""设置页与顶栏导航测试（UI 重构：顶栏「记录/检索/更多功能」并排；设置页落地，§28）。
+"""设置页与顶栏导航测试（UI 重构：顶栏「记录/检索/更多功能」并排；设置页落地，§28/§29）。
 
 - GET /settings：设置页渲染（通用/模型/检索/数据管理/安全/关于区块，服务端渲染生效值）；
+- 模型配置/检索配置默认折叠（<details> 不带 open）；模型配置含对话整理/Ollama/联网搜索三个子块，
+  联网搜索模型只读（仅 DeepSeek + 暂不支持修改）；
 - 顶栏导航：「记录」「检索」「更多功能」三按钮并排一行，其余功能收进折叠菜单；
 - 更名：「笔记」→「浏览笔记」、「问答」→「检索」、「回顾」→「兴趣回顾」；
 - /static 静态资源带 Cache-Control: no-cache（浏览器每次重新校验，UI 改动即时生效）。
@@ -23,14 +25,57 @@ def test_settings_page_html(client):
         "修改登录密码",
         'id="settings-form"',
         'id="weekly-llm"',  # 默认开启（服务端渲染 checked）
+        # 模型配置三个子块 + 提供商下拉
+        "对话/整理模型",
+        "Ollama 模型（本地 Embedding）",
+        "联网搜索模型",
+        'id="llm-provider"',
+        'id="llm-model"',
+        'list="llm-model-options"',
+        'id="llm-model-options"',
+        'id="embed-model"',
+        'id="search-provider"',
+        'id="search-model"',
+        "暂不支持修改",
     ):
         assert fragment in resp.text, f"设置页缺少: {fragment}"
+    # 模型配置/检索配置默认折叠：<details> 不带 open 属性
+    for tag in (
+        '<details class="section" id="model-cfg">',
+        '<details class="section" id="retrieval-cfg">',
+    ):
+        assert tag in resp.text, f"缺少折叠分区: {tag}"
+    assert 'id="model-cfg" open' not in resp.text, "模型配置应默认折叠"
+    assert 'id="retrieval-cfg" open' not in resp.text, "检索配置应默认折叠"
+    # 联网搜索模型只读：提供商只有 DeepSeek 一项且 select 禁用
+    assert '<select id="search-provider" disabled>' in resp.text
     # 登录未启用时密码区是提示而非表单
     assert "配置 AUTH_PASSWORD 后即可在此修改密码" in resp.text
     assert 'id="old-password"' not in resp.text
     # 默认分类下拉包含全部体系分类
     for cat in ("技术", "工作", "学习", "生活", "健康", "财务", "灵感", "其他"):
         assert f'value="{cat}"' in resp.text, f"默认分类下拉缺少: {cat}"
+
+
+def test_settings_page_provider_options(client):
+    """提供商下拉包含注册表全部选项，且当前生效提供商被选中（限定在 llm-provider 内检查，
+    避免与联网搜索只读下拉里的 deepseek 混淆）。"""
+    import re
+
+    def llm_provider_html(html):
+        m = re.search(r'id="llm-provider">(.*?)</select>', html, re.DOTALL)
+        assert m, "设置页缺少 llm-provider 下拉"
+        return m.group(1)
+
+    sel = llm_provider_html(client.get("/settings").text)
+    for pid in ("deepseek", "openai", "openrouter", "moonshot", "zhipu", "qwen", "siliconflow"):
+        assert f'value="{pid}"' in sel, f"提供商下拉缺少: {pid}"
+    assert 'value="deepseek" selected' in sel  # 默认 deepseek
+    # 切换提供商后刷新页面，下拉选中新值
+    client.put("/api/settings", json={"llm_provider": "moonshot"})
+    sel = llm_provider_html(client.get("/settings").text)
+    assert 'value="moonshot" selected' in sel
+    assert 'value="deepseek" selected' not in sel
 
 
 def test_settings_page_renders_effective_values(client, conn):

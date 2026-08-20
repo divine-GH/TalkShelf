@@ -44,6 +44,9 @@ DATABASE_PATH = Path(os.getenv("DATABASE_PATH", str(DATA_DIR / "note-brain.db"))
 # ---------------------------------------------------------------------------
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+LLM_PROVIDER = os.getenv(
+    "LLM_PROVIDER", "deepseek"
+)  # 对话/整理模型提供商（§29：providers.py 注册表）
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")  # §6.1 预设
 LLM_TIMEOUT = _env_int("LLM_TIMEOUT", 60)  # 秒；对话/整理调用
 LLM_MAX_RETRIES = 1  # §6.3：校验失败自动重试 1 次

@@ -18,7 +18,10 @@ KEY_WEEKLY_LLM = (
     "weekly_llm"  # "1"/"0"：每周总结是否用 LLM 生成（关闭 = 纯统计，省 token、离线可用）
 )
 KEY_DEFAULT_CATEGORY = "default_category"  # 直存（待整理）笔记兜底分类；"" = 不启用
-KEY_LLM_MODEL = "llm_model"  # DeepSeek 对话/整理模型名
+KEY_LLM_PROVIDER = (
+    "llm_provider"  # 对话/整理模型提供商 id（providers.py 注册表；未改回落 .env LLM_PROVIDER）
+)
+KEY_LLM_MODEL = "llm_model"  # 对话/整理模型名（随 llm_provider 的提供商 API 调用）
 KEY_EMBED_MODEL = "embed_model"  # Ollama embedding 模型名
 KEY_SEARCH_MODEL = "search_model"  # 联网搜索模型名
 KEY_VECTOR_TOP_K = "vector_top_k"  # 向量召回 Top-K
@@ -97,6 +100,7 @@ def effective(conn: sqlite3.Connection) -> dict:
     return {
         "weekly_llm": get_bool(conn, KEY_WEEKLY_LLM, True),
         "default_category": get_str(conn, KEY_DEFAULT_CATEGORY, ""),
+        "llm_provider": get_str(conn, KEY_LLM_PROVIDER, config.LLM_PROVIDER),
         "llm_model": get_str(conn, KEY_LLM_MODEL, config.LLM_MODEL),
         "embed_model": get_str(conn, KEY_EMBED_MODEL, config.EMBED_MODEL),
         "search_model": get_str(conn, KEY_SEARCH_MODEL, config.SEARCH_MODEL),

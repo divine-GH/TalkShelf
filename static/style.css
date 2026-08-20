@@ -132,7 +132,20 @@ textarea:focus, input:focus { outline: 2px solid var(--primary); outline-offset:
 .error { color: var(--danger); font-size: 0.9rem; margin: 8px 0 0; }
 .empty { color: var(--muted); }
 
-/* ---- 设置页（§28） ---- */
+/* ---- 设置页（§28/§29） ---- */
+/* 折叠分区：模型配置/检索配置默认收起（<details> 不带 open），点击标题展开 */
+details.section { margin-top: 26px; }
+details.section > summary { cursor: pointer; }
+details.section > summary h2 { display: inline-block; margin: 0; }
+details.section > summary::-webkit-details-marker { color: var(--muted); }
+details.section[open] > summary { margin-bottom: 10px; }
+.set-group-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #333;
+  margin: 14px 0 2px;
+}
+.set-group-title:first-child { margin-top: 0; }
 .set-row {
   display: flex;
   align-items: center;
@@ -154,6 +167,12 @@ textarea:focus, input:focus { outline: 2px solid var(--primary); outline-offset:
   background: var(--card);
 }
 .set-row input[type="checkbox"] { width: 22px; height: 22px; flex-shrink: 0; }
+/* 禁用项（联网搜索模型：暂不支持修改） */
+.set-row input[disabled], .set-row select[disabled] {
+  color: var(--muted);
+  background: var(--bg);
+  cursor: not-allowed;
+}
 
 /* ---- 首页记录入口 ---- */
 .record-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }

@@ -29,27 +29,64 @@
     </div>
   </section>
 
-  <section class="section">
-    <h2>模型配置</h2>
-    <p class="hint">改完立即生效；模型名须与对应服务商一致（DeepSeek / Ollama）。</p>
+  <details class="section" id="model-cfg">
+    <summary><h2>模型配置</h2></summary>
+    <p class="hint">改完立即生效。对话/整理模型可选多个提供商；联网搜索暂仅支持 DeepSeek。</p>
+
     <div class="note-item">
+      <p class="set-group-title">对话/整理模型</p>
       <label class="set-row">
-        <span class="set-label">对话/整理模型</span>
-        <input type="text" id="llm-model" value="{{ s.llm_model }}" maxlength="100" autocomplete="off">
+        <span class="set-label">模型提供商
+          <span class="set-hint">除 DeepSeek 外需在 .env 配置对应 API Key（见 .env.example）</span>
+        </span>
+        <select id="llm-provider">
+          {% for p in providers %}
+          <option value="{{ p.id }}" {% if s.llm_provider == p.id %}selected{% endif %}>{{ p.name }}</option>
+          {% endfor %}
+        </select>
       </label>
       <label class="set-row">
-        <span class="set-label">Embedding 模型</span>
+        <span class="set-label">可选模型
+          <span class="set-hint">列表来自该提供商的模型接口（需 API Key）；不在列表内也可手动输入</span>
+        </span>
+        <input type="text" id="llm-model" list="llm-model-options" value="{{ s.llm_model }}"
+               maxlength="100" autocomplete="off">
+      </label>
+      <datalist id="llm-model-options"></datalist>
+      <p class="hint" id="model-list-msg"></p>
+    </div>
+
+    <div class="note-item">
+      <p class="set-group-title">Ollama 模型（本地 Embedding）</p>
+      <label class="set-row">
+        <span class="set-label">Embedding 模型
+          <span class="set-hint">本地 Ollama 服务地址由 .env 的 OLLAMA_URL 配置</span>
+        </span>
         <input type="text" id="embed-model" value="{{ s.embed_model }}" maxlength="100" autocomplete="off">
       </label>
+    </div>
+
+    <div class="note-item">
+      <p class="set-group-title">联网搜索模型</p>
       <label class="set-row">
-        <span class="set-label">联网搜索模型</span>
-        <input type="text" id="search-model" value="{{ s.search_model }}" maxlength="100" autocomplete="off">
+        <span class="set-label">模型提供商
+          <span class="set-hint">暂不支持修改：联网搜索走 DeepSeek 原生 web_search（§22）</span>
+        </span>
+        <select id="search-provider" disabled>
+          <option value="deepseek" selected>DeepSeek</option>
+        </select>
+      </label>
+      <label class="set-row">
+        <span class="set-label">模型
+          <span class="set-hint">暂不支持修改</span>
+        </span>
+        <input type="text" id="search-model" value="{{ s.search_model }}" disabled>
       </label>
     </div>
-  </section>
+  </details>
 
-  <section class="section">
-    <h2>检索配置</h2>
+  <details class="section" id="retrieval-cfg">
+    <summary><h2>检索配置</h2></summary>
     <p class="hint">偏高级的参数，一般不用动；改完立即生效。</p>
     <div class="note-item">
       <label class="set-row">
@@ -73,7 +110,7 @@
         <input type="number" id="materials-top-k" value="{{ s.materials_top_k }}" min="1" max="50">
       </label>
     </div>
-  </section>
+  </details>
 
   <p><button type="submit" class="btn btn-primary">保存设置</button></p>
 </form>
@@ -141,15 +178,48 @@
     msgBox.hidden = false;
   }
 
+  // 可选模型列表：按当前提供商拉取（GET /api/settings/models），失败回落内置列表
+  var modelInput = document.getElementById('llm-model');
+  var modelOptions = document.getElementById('llm-model-options');
+  var modelListMsg = document.getElementById('model-list-msg');
+  function loadModels(provider) {
+    modelListMsg.textContent = '加载模型列表…';
+    fetch('/api/settings/models?provider=' + encodeURIComponent(provider))
+      .then(function (resp) {
+        return resp.json().then(function (data) {
+          if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        modelOptions.innerHTML = '';
+        data.models.forEach(function (m) {
+          var opt = document.createElement('option');
+          opt.value = m;
+          modelOptions.appendChild(opt);
+        });
+        modelListMsg.textContent = data.source === 'api'
+          ? ('已从 ' + data.provider_name + ' 拉取 ' + data.models.length + ' 个模型（未列出的模型可直接输入）')
+          : ('模型列表获取失败：' + data.detail + '（显示内置列表，未列出的模型可直接输入）');
+      })
+      .catch(function (ex) {
+        modelListMsg.textContent = '模型列表获取失败：' + ex.message + '（可手动输入模型名）';
+      });
+  }
+  document.getElementById('llm-provider').addEventListener('change', function (e) {
+    loadModels(e.target.value);
+  });
+  loadModels(document.getElementById('llm-provider').value);
+
   // 保存设置（通用 + 模型 + 检索）
   document.getElementById('settings-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     var body = {
       weekly_llm: document.getElementById('weekly-llm').checked,
       default_category: document.getElementById('default-category').value,
-      llm_model: document.getElementById('llm-model').value.trim(),
+      llm_provider: document.getElementById('llm-provider').value,
+      llm_model: modelInput.value.trim(),
       embed_model: document.getElementById('embed-model').value.trim(),
-      search_model: document.getElementById('search-model').value.trim(),
       vector_top_k: parseInt(document.getElementById('vector-top-k').value, 10),
       fts_top_k: parseInt(document.getElementById('fts-top-k').value, 10),
       ask_top_n: parseInt(document.getElementById('ask-top-n').value, 10),

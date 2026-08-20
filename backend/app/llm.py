@@ -1,6 +1,6 @@
-"""LLM 集成层（设计文档 §6）：DeepSeek chat-completions + json_object + 校验重试。
+"""LLM 集成层（设计文档 §6/§29）：OpenAI 兼容 chat-completions + json_object + 校验重试。
 
-要点（§6.3）：
+- 提供商与模型由设置页决定（providers.py 注册表 + llm_provider/llm_model 运行时设置）；
 - temperature=0；json_object 模式（prompt 必须含 "json" 字样）；
 - 输出偶带 markdown 围栏，先剥离 ```json ... ``` 再解析；
 - 解析/校验失败自动重试 1 次，仍失败抛 LLMError（调用方决定降级/标 failed）。
@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from . import config, settings
+from . import config, providers, settings
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,14 @@ CATEGORY_HINT = "；".join(f"{k}：{v}" for k, v in config.CATEGORIES.items())
 
 
 def _llm_model() -> str:
-    """当前生效的对话/整理模型（设置页可改，§28；未改回落 .env LLM_MODEL）。"""
+    """当前生效的对话/整理模型（设置页可改，§28/§29；未改回落 .env LLM_MODEL）。"""
     return settings.resolve_str(settings.KEY_LLM_MODEL, config.LLM_MODEL)
+
+
+def _llm_provider() -> providers.Provider:
+    """当前生效的对话/整理提供商（设置页可选，§29；未知 id 回落 DeepSeek）。"""
+    pid = settings.resolve_str(settings.KEY_LLM_PROVIDER, config.LLM_PROVIDER)
+    return providers.get(pid)
 
 
 class LLMError(Exception):
@@ -53,9 +59,11 @@ def _call_chat(
     response_format: dict | None = None,
     timeout: float = config.LLM_TIMEOUT,
 ) -> str:
-    """调 DeepSeek chat-completions，返回首个 choice 的文本。"""
-    if not config.DEEPSEEK_API_KEY:
-        raise LLMError("DEEPSEEK_API_KEY 未配置")
+    """调当前提供商的 chat-completions，返回首个 choice 的文本。"""
+    p = _llm_provider()
+    key = providers.api_key(p)
+    if not key:
+        raise LLMError(f"{p.name} 的 API Key 未配置（.env 的 {p.api_key_env}）")
     body: dict[str, Any] = {
         "model": _llm_model(),
         "messages": messages,
@@ -64,20 +72,20 @@ def _call_chat(
     }
     if response_format:
         body["response_format"] = response_format
-    url = f"{config.DEEPSEEK_BASE_URL}/chat/completions"
+    url = f"{p.base_url}/chat/completions"
     try:
         with httpx.Client(timeout=timeout) as client:
             resp = client.post(
                 url,
-                headers={"Authorization": f"Bearer {config.DEEPSEEK_API_KEY}"},
+                headers={"Authorization": f"Bearer {key}"},
                 json=body,
             )
         if resp.status_code != 200:
-            raise LLMError(f"DeepSeek HTTP {resp.status_code}: {resp.text[:300]}")
+            raise LLMError(f"{p.name} HTTP {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
         return data["choices"][0]["message"]["content"]
     except httpx.HTTPError as e:
-        raise LLMError(f"DeepSeek 调用失败: {e}") from e
+        raise LLMError(f"{p.name} 调用失败: {e}") from e
 
 
 def _chat_with_tools(
@@ -91,8 +99,10 @@ def _chat_with_tools(
     返回 (文本, tool_calls 列表)；tool_calls 为空表示本轮无工具调用。
     独立于 _call_chat：无工具路径仍走 _call_chat，不破坏现有调用方与测试 mock。
     """
-    if not config.DEEPSEEK_API_KEY:
-        raise LLMError("DEEPSEEK_API_KEY 未配置")
+    p = _llm_provider()
+    key = providers.api_key(p)
+    if not key:
+        raise LLMError(f"{p.name} 的 API Key 未配置（.env 的 {p.api_key_env}）")
     body: dict[str, Any] = {
         "model": _llm_model(),
         "messages": messages,
@@ -100,21 +110,21 @@ def _chat_with_tools(
         "stream": False,
         "tools": tools,
     }
-    url = f"{config.DEEPSEEK_BASE_URL}/chat/completions"
+    url = f"{p.base_url}/chat/completions"
     try:
         with httpx.Client(timeout=timeout) as client:
             resp = client.post(
                 url,
-                headers={"Authorization": f"Bearer {config.DEEPSEEK_API_KEY}"},
+                headers={"Authorization": f"Bearer {key}"},
                 json=body,
             )
         if resp.status_code != 200:
-            raise LLMError(f"DeepSeek HTTP {resp.status_code}: {resp.text[:300]}")
+            raise LLMError(f"{p.name} HTTP {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
         msg = data["choices"][0]["message"]
         return (msg.get("content") or ""), (msg.get("tool_calls") or [])
     except httpx.HTTPError as e:
-        raise LLMError(f"DeepSeek 调用失败: {e}") from e
+        raise LLMError(f"{p.name} 调用失败: {e}") from e
 
 
 def parse_json(text: str) -> dict:

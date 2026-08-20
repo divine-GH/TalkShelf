@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from . import auth, config, db, fetch, llm, notes, retrieval, settings, web_search
+from . import auth, config, db, fetch, llm, notes, providers, retrieval, settings, web_search
 from . import queue as queue_mod
 
 logger = logging.getLogger(__name__)
@@ -860,6 +860,7 @@ def search_history_delete(record_id: int, conn: ConnDep, _auth: ApiAuthDep) -> R
 SETTINGS_FIELDS: dict[str, type] = {
     "weekly_llm": bool,
     "default_category": str,
+    "llm_provider": str,
     "llm_model": str,
     "embed_model": str,
     "search_model": str,
@@ -888,6 +889,9 @@ def _validate_setting(key: str, value: object) -> None:
     elif key == "default_category":
         if not (value == "" or value in config.CATEGORIES):
             raise HTTPException(status_code=422, detail=f"default_category 不在分类体系内: {value}")
+    elif key == "llm_provider":
+        if value not in providers.PROVIDERS:
+            raise HTTPException(status_code=422, detail=f"llm_provider 不在提供商注册表内: {value}")
     elif key in ("llm_model", "embed_model", "search_model"):
         if not isinstance(value, str) or not value.strip() or len(value) > 100:
             raise HTTPException(status_code=422, detail=f"{key} 须为 1~100 字符的模型名")
@@ -938,6 +942,30 @@ def clear_search_history(conn: ConnDep, _auth: ApiAuthDep) -> dict:
     cur = conn.execute("DELETE FROM search_history")
     conn.commit()
     return {"deleted": cur.rowcount}
+
+
+@router.get("/api/settings/models")
+def settings_models(provider: str, _auth: ApiAuthDep) -> dict:
+    """拉取指定提供商的模型列表（GET {base}/models，Bearer .env key），设置页「可选模型」用。
+
+    失败（无 key/网络/HTTP 错误）回落内置 fallback_models：source="fallback" + detail 原因；
+    成功 source="api"。登录启用时走 ApiAuthDep（app.js 自动带 CSRF 头，GET 无碍）。
+    """
+    if provider not in providers.PROVIDERS:
+        raise HTTPException(status_code=422, detail=f"未知提供商: {provider}")
+    p = providers.get(provider)
+    try:
+        models = providers.fetch_models(provider)
+        return {"provider": provider, "provider_name": p.name, "models": models, "source": "api"}
+    except providers.ProviderError as e:
+        logger.warning("模型列表拉取失败（回落内置列表）：%s", e)
+        return {
+            "provider": provider,
+            "provider_name": p.name,
+            "models": list(p.fallback_models),
+            "source": "fallback",
+            "detail": str(e),
+        }
 
 
 @router.get("/api/settings/failed-notes")
@@ -1120,6 +1148,7 @@ def settings_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLRe
             "active": "settings",
             "app_version": config.APP_VERSION,
             "categories": config.CATEGORIES,
+            "providers": providers.options(),
             "s": settings.effective(conn),
         },
     )
