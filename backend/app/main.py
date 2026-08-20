@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
 from . import api, config, db, queue
@@ -33,5 +33,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="note-brain", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def static_no_cache(request: Request, call_next):
+    """/static 一律 Cache-Control: no-cache：浏览器每次重新校验（304 则用缓存）。
+
+    StaticFiles 不发送 Cache-Control，浏览器会按 Last-Modified 启发式缓存
+    （旧 app.js/style.css 可被缓存数小时）——改 UI 后用户拿到旧 JS/CSS，
+    「更多功能」按钮无反应、样式不生效（§26.4）。
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=str(config.BASE_DIR / "static")), name="static")
 app.include_router(api.router)

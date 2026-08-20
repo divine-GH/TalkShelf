@@ -48,29 +48,32 @@ body {
 }
 .topbar nav a.on { color: var(--primary); background: var(--user-bubble); font-weight: 600; }
 
-/* 「更多功能」下拉菜单 */
+/* 「更多功能」下拉菜单（扁平卡片风，与全局 1px 边框/圆角体系一致） */
 .topbar nav .menu { position: relative; margin-left: 14px; }
 .topbar nav .menu-btn {
   margin: 0;
   font: inherit;
+  line-height: inherit;
   color: var(--muted);
   background: none;
   border: none;
+  -webkit-appearance: none;
+  appearance: none; /* 重置浏览器默认按钮外观（iOS Safari 等） */
   padding: 4px 10px;
   border-radius: 999px;
   cursor: pointer;
 }
 .topbar nav .menu-btn.on { color: var(--primary); background: var(--user-bubble); font-weight: 600; }
-.menu-btn-caret { font-size: 0.75rem; margin-left: 3px; opacity: 0.7; }
+.menu-btn-caret { font-size: 0.7rem; margin-left: 4px; opacity: 0.55; }
 .menu-drop {
   position: absolute;
   right: 0;
-  top: calc(100% + 8px);
-  min-width: 172px;
+  top: calc(100% + 6px);
+  min-width: 176px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 6px 20px rgba(31, 35, 41, 0.12);
+  box-shadow: 0 1px 6px rgba(31, 35, 41, 0.08); /* 微阴影：仅作层次提示，不破坏扁平感 */
   padding: 6px;
   z-index: 30;
 }

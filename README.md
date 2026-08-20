@@ -19,7 +19,7 @@
 - **笔记详情页**（M3）：完整编辑（保存触发重整理：重算向量/重建 FTS/重新查重）、修正对话入口、来源对话展开、合并/忽略交互（合并含 merged 出索引）、重新整理、删除
 - **登录**（M3）：`.env` 配 `AUTH_PASSWORD` 即全局启用（argon2 + SQLite session + 失败限速 + CSRF）
 - **统计页 + 每周总结**（M3）：分类/标签/时间分布；LLM 生成周报（失败降级纯统计）
-- 94 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
+- 95 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
 
 ## 登录（M3，可选）
 

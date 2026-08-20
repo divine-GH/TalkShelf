@@ -2,7 +2,8 @@
 
 - GET /settings：占位页渲染（关于/版本信息），与其它页面一样受登录保护；
 - 顶栏导航：只留「记录」「检索」两个主按钮，其余功能收进「更多功能」折叠菜单；
-- 更名：「笔记」→「浏览全部笔记」、「问答」→「检索」。
+- 更名：「笔记」→「浏览全部笔记」、「问答」→「检索」；
+- /static 静态资源带 Cache-Control: no-cache（浏览器每次重新校验，UI 改动即时生效）。
 """
 
 
@@ -34,3 +35,13 @@ def test_topbar_nav_restructure(client):
     # 旧导航标签已消失（独立导航位被折叠菜单取代）
     assert ">笔记</a>" not in resp.text
     assert ">问答</a>" not in resp.text
+
+
+def test_static_assets_revalidated(client):
+    """静态资源必须带 no-cache：StaticFiles 默认无 Cache-Control，浏览器启发式缓存
+    旧 app.js/style.css 会导致「更多功能」无反应、样式不生效（§26.4 根因）。"""
+    for path in ("/static/app.js", "/static/style.css"):
+        resp = client.get(path)
+        assert resp.status_code == 200, path
+        cc = resp.headers.get("cache-control", "").lower()
+        assert "no-cache" in cc, f"{path} 缺少 Cache-Control: no-cache（实际: {cc or '无'}）"

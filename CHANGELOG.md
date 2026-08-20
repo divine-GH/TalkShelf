@@ -24,6 +24,11 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 
 - **顶栏重构**：只留「记录」「检索」两个主按钮，其余功能收进「更多功能」折叠菜单（浏览全部笔记/回顾/统计/设置，退出登录也移入）；
   「笔记」更名「浏览（全部笔记）」，「问答」更名「检索」（URL 不变，`/notes`、`/ask`）。
+- **静态资源缓存策略**：`/static` 响应加 `Cache-Control: no-cache`（浏览器每次重新校验，未变则 304）——
+  修复 StaticFiles 无 Cache-Control 导致浏览器启发式缓存旧 app.js/style.css、
+  「更多功能」按钮点击无反应且样式不生效的问题（§26.4 根因）。
+- **「更多功能」下拉样式收敛**：扁平卡片风（微阴影 + 1px 边框 + 12px 圆角，与全局一致）；
+  按钮加 `appearance: none` 重置默认外观（iOS Safari 等不再显示原生按钮样式）。
 
 ### Fixed
 
