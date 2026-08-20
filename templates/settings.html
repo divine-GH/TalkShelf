@@ -33,7 +33,7 @@
 
   <details class="section" id="model-cfg">
     <summary><h2>模型配置</h2></summary>
-    <p class="hint">修改后需点击「保存设置」才生效。对话/整理模型可选多个提供商；联网搜索暂仅支持 DeepSeek。</p>
+    <p class="hint">修改后需点击「保存设置」才生效。对话/整理模型可选多个提供商；联网搜索固定 DeepSeek，模型可选。</p>
 
     <div class="note-item">
       <p class="set-group-title">对话/整理模型</p>
@@ -81,18 +81,28 @@
       <p class="set-group-title">联网搜索模型</p>
       <label class="set-row">
         <span class="set-label">模型提供商
-          <span class="set-hint">暂不支持修改：联网搜索走 DeepSeek 原生 web_search（§22）</span>
+          <span class="set-hint">固定 DeepSeek：联网搜索走 DeepSeek 原生 web_search（§22）</span>
         </span>
         <select id="search-provider" disabled>
           <option value="deepseek" selected>DeepSeek</option>
         </select>
       </label>
-      <label class="set-row">
+      <div class="set-row">
         <span class="set-label">模型
-          <span class="set-hint">暂不支持修改</span>
+          <span class="set-hint">列表来自 DeepSeek 模型接口（需 API Key）；也可选「自定义模型…」手动输入</span>
         </span>
-        <input type="text" id="search-model" value="{{ s.search_model }}" disabled>
-      </label>
+        <select id="search-model">
+          <option value="{{ s.search_model }}" selected>{{ s.search_model }}</option>
+          <option value="__custom__">自定义模型…</option>
+        </select>
+        <span class="model-custom-wrap" id="search-model-custom-wrap">
+          <input type="text" id="search-model-custom" maxlength="100" autocomplete="off" placeholder="输入模型名，回车或点「确认」">
+          <button type="button" id="search-custom-ok" class="btn btn-small">确认</button>
+          <button type="button" id="search-custom-cancel" class="btn btn-small">取消</button>
+        </span>
+        <span class="set-dirty" data-for="search-model" hidden>已修改但未保存</span>
+      </div>
+      <p class="hint" id="search-model-list-msg"></p>
     </div>
   </details>
 
@@ -196,136 +206,159 @@
 
   // 可选模型：下拉框按当前提供商拉取（GET /api/settings/models），失败回落内置列表；
   // 下拉含「自定义模型…」入口（选择后切换为文本输入 + 确认/取消按钮：回车/点确认提交，
-  // 输入与下拉已有选项（含已获取模型列表）相同时直接复用该选项、不新增条目；取消恢复原选择）
-  var modelSel = document.getElementById('llm-model');
-  var modelCustomWrap = document.getElementById('llm-model-custom-wrap');
-  var modelCustom = document.getElementById('llm-model-custom');
-  var modelCustomOk = document.getElementById('llm-custom-ok');
-  var modelCustomCancel = document.getElementById('llm-custom-cancel');
-  var modelListMsg = document.getElementById('model-list-msg');
+  // 输入与下拉已有选项（含已获取模型列表）相同时直接复用该选项、不新增条目；取消恢复原选择）。
+  // 「对话/整理模型」与「联网搜索模型」共用 initModelSelect 工厂，各自实例状态独立。
   var DEFAULT_LLM_MODEL = {{ llm_model_default | tojson }};  // .env 默认模型（下拉「（默认值）」标注用）
-  var fetchedModels = [];  // 当前提供商已获取的模型列表
-  var lastModelValue = modelSel.value;  // 进入自定义输入前的下拉值（取消时恢复）
 
-  function currentModel() {
-    return modelCustomWrap.classList.contains('show') ? modelCustom.value.trim() : modelSel.value;
-  }
+  function initModelSelect(cfg) {
+    // cfg: {sel, wrap, input, ok, cancel, msg, provider, defaultModel}（元素 id）
+    var sel = document.getElementById(cfg.sel);
+    var wrap = document.getElementById(cfg.wrap);
+    var input = document.getElementById(cfg.input);
+    var okBtn = document.getElementById(cfg.ok);
+    var cancelBtn = document.getElementById(cfg.cancel);
+    var msg = document.getElementById(cfg.msg);
+    var providerSel = document.getElementById(cfg.provider);
+    var defaultModel = cfg.defaultModel;
+    var fetchedModels = [];  // 当前提供商已获取的模型列表
+    var lastModelValue = sel.value;  // 进入自定义输入前的下拉值（取消时恢复）
 
-  function fillModelOptions(models) {
-    fetchedModels = models;
-    var current = modelSel.value;
-    modelSel.innerHTML = '';
-    if (current && current !== '__custom__' && models.indexOf(current) === -1) {
-      var cur = document.createElement('option');
-      cur.value = current;
-      // 当前生效模型不在列表：等于 .env 默认时标「（默认值）」，否则标「（当前值）」
-      cur.textContent = current + (current === DEFAULT_LLM_MODEL ? '（默认值）' : '（当前值）');
-      modelSel.appendChild(cur);
+    function value() {
+      return wrap.classList.contains('show') ? input.value.trim() : sel.value;
     }
-    models.forEach(function (m) {
-      var opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      modelSel.appendChild(opt);
-    });
-    var custom = document.createElement('option');
-    custom.value = '__custom__';
-    custom.textContent = '自定义模型…';
-    modelSel.appendChild(custom);
-    modelSel.value = current;
-    // 自定义输入中的值未确认时被下拉选中覆盖：保持不回退（若用户正在输入则不打断）
-    if (modelCustomWrap.classList.contains('show')) modelSel.value = '__custom__';
-    if (modelSel.value !== '__custom__') lastModelValue = modelSel.value;
-  }
 
-  function loadModels(provider) {
-    modelListMsg.textContent = '加载模型列表…';
-    fetch('/api/settings/models?provider=' + encodeURIComponent(provider))
-      .then(function (resp) {
-        return resp.json().then(function (data) {
-          if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
-          return data;
-        });
-      })
-      .then(function (data) {
-        fillModelOptions(data.models);
-        modelListMsg.textContent = data.source === 'api'
-          ? ('已从 ' + data.provider_name + ' 拉取 ' + data.models.length + ' 个模型')
-          : ('模型列表获取失败：' + data.detail + '（显示内置列表）');
-      })
-      .catch(function (ex) {
-        modelListMsg.textContent = '模型列表获取失败：' + ex.message + '（可在「自定义模型…」手动输入）';
-      });
-  }
-
-  function commitCustomModel() {
-    var v = modelCustom.value.trim();
-    if (!v) {  // 空输入等同取消
-      cancelCustomModel();
-      return;
-    }
-    var exists = false;
-    // 与已获取模型列表相同则直接复用该选项，不新增条目
-    if (fetchedModels.indexOf(v) !== -1) {
-      exists = true;
-    } else {
-      for (var i = 0; i < modelSel.options.length; i++) {
-        if (modelSel.options[i].value === v) { exists = true; break; }
+    function fillOptions(models) {
+      fetchedModels = models;
+      var current = sel.value;
+      sel.innerHTML = '';
+      if (current && current !== '__custom__' && models.indexOf(current) === -1) {
+        var cur = document.createElement('option');
+        cur.value = current;
+        // 当前生效模型不在列表：等于 .env 默认时标「（默认值）」，否则标「（当前值）」
+        cur.textContent = current + (current === defaultModel ? '（默认值）' : '（当前值）');
+        sel.appendChild(cur);
       }
+      models.forEach(function (m) {
+        var opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m;
+        sel.appendChild(opt);
+      });
+      var custom = document.createElement('option');
+      custom.value = '__custom__';
+      custom.textContent = '自定义模型…';
+      sel.appendChild(custom);
+      sel.value = current;
+      // 自定义输入中的值未确认时被下拉选中覆盖：保持不回退（若用户正在输入则不打断）
+      if (wrap.classList.contains('show')) sel.value = '__custom__';
+      if (sel.value !== '__custom__') lastModelValue = sel.value;
     }
-    if (!exists) {
-      var opt = document.createElement('option');
-      opt.value = v;
-      opt.textContent = v;
-      modelSel.insertBefore(opt, modelSel.firstChild);
+
+    function loadModels(provider) {
+      msg.textContent = '加载模型列表…';
+      fetch('/api/settings/models?provider=' + encodeURIComponent(provider))
+        .then(function (resp) {
+          return resp.json().then(function (data) {
+            if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+            return data;
+          });
+        })
+        .then(function (data) {
+          fillOptions(data.models);
+          msg.textContent = data.source === 'api'
+            ? ('已从 ' + data.provider_name + ' 拉取 ' + data.models.length + ' 个模型')
+            : ('模型列表获取失败：' + data.detail + '（显示内置列表）');
+        })
+        .catch(function (ex) {
+          msg.textContent = '模型列表获取失败：' + ex.message + '（可在「自定义模型…」手动输入）';
+        });
     }
-    modelSel.value = v;
-    lastModelValue = v;
-    modelCustomWrap.classList.remove('show');
-    modelSel.hidden = false;
-    updateDirty();
+
+    function commit() {
+      if (!wrap.classList.contains('show')) return;  // 未在自定义输入态：无需收拢
+      var v = input.value.trim();
+      if (!v) {  // 空输入等同取消
+        cancelCustom();
+        return;
+      }
+      var exists = false;
+      // 与已获取模型列表相同则直接复用该选项，不新增条目
+      if (fetchedModels.indexOf(v) !== -1) {
+        exists = true;
+      } else {
+        for (var i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value === v) { exists = true; break; }
+        }
+      }
+      if (!exists) {
+        var opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        sel.insertBefore(opt, sel.firstChild);
+      }
+      sel.value = v;
+      lastModelValue = v;
+      wrap.classList.remove('show');
+      sel.hidden = false;
+      updateDirty();
+    }
+
+    function cancelCustom() {
+      wrap.classList.remove('show');
+      sel.hidden = false;
+      sel.value = lastModelValue;
+      updateDirty();
+    }
+
+    // 选择「自定义模型…」：显示文本输入 + 确认/取消按钮（回车确认；不再失焦即确认）
+    sel.addEventListener('change', function () {
+      if (sel.value === '__custom__') {
+        input.value = '';
+        sel.hidden = true;
+        wrap.classList.add('show');
+        input.focus();
+      } else {
+        lastModelValue = sel.value;
+      }
+      updateDirty();
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit();
+      }
+    });
+    input.addEventListener('input', updateDirty);
+    okBtn.addEventListener('click', commit);
+    cancelBtn.addEventListener('click', cancelCustom);
+    providerSel.addEventListener('change', function (e) {
+      loadModels(e.target.value);
+    });
+    loadModels(providerSel.value);
+
+    return {value: value, commit: commit};
   }
 
-  function cancelCustomModel() {
-    modelCustomWrap.classList.remove('show');
-    modelSel.hidden = false;
-    modelSel.value = lastModelValue;
-    updateDirty();
-  }
-
-  // 选择「自定义模型…」：显示文本输入 + 确认/取消按钮（回车确认；不再失焦即确认）
-  modelSel.addEventListener('change', function () {
-    if (modelSel.value === '__custom__') {
-      modelCustom.value = '';
-      modelSel.hidden = true;
-      modelCustomWrap.classList.add('show');
-      modelCustom.focus();
-    } else {
-      lastModelValue = modelSel.value;
-    }
-    updateDirty();
+  var llmModelCtl = initModelSelect({
+    sel: 'llm-model', wrap: 'llm-model-custom-wrap', input: 'llm-model-custom',
+    ok: 'llm-custom-ok', cancel: 'llm-custom-cancel', msg: 'model-list-msg',
+    provider: 'llm-provider', defaultModel: DEFAULT_LLM_MODEL
   });
-  modelCustom.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      commitCustomModel();
-    }
+  var searchModelCtl = initModelSelect({
+    sel: 'search-model', wrap: 'search-model-custom-wrap', input: 'search-model-custom',
+    ok: 'search-custom-ok', cancel: 'search-custom-cancel', msg: 'search-model-list-msg',
+    provider: 'search-provider', defaultModel: {{ search_model_default | tojson }}
   });
-  modelCustomOk.addEventListener('click', commitCustomModel);
-  modelCustomCancel.addEventListener('click', cancelCustomModel);
-
-  document.getElementById('llm-provider').addEventListener('change', function (e) {
-    loadModels(e.target.value);
-  });
-  loadModels(document.getElementById('llm-provider').value);
 
   // 「已修改但未保存」标注：控件变化即与保存基线（SNAPSHOT）比对，保存成功后重置基线
   var SNAPSHOT = {};
   var DIRTY_IDS = ['weekly-llm', 'default-category', 'llm-provider', 'llm-model', 'embed-model',
-                   'vector-top-k', 'fts-top-k', 'ask-top-n', 'vector-min-sim', 'materials-top-k'];
+                   'search-model', 'vector-top-k', 'fts-top-k', 'ask-top-n', 'vector-min-sim',
+                   'materials-top-k'];
 
   function fieldValue(id) {
-    if (id === 'llm-model') return currentModel();
+    if (id === 'llm-model') return llmModelCtl.value();
+    if (id === 'search-model') return searchModelCtl.value();
     var el = document.getElementById(id);
     return el.type === 'checkbox' ? el.checked : el.value;
   }
@@ -347,19 +380,23 @@
   }
 
   DIRTY_IDS.forEach(function (id) {
-    if (id === 'llm-model') return;  // 模型的变化由下拉 change / 自定义输入 input 单独监听
+    if (id === 'llm-model' || id === 'search-model') return;  // 模型变化由各实例内部监听
     document.getElementById(id).addEventListener('change', updateDirty);
   });
-  modelCustom.addEventListener('input', updateDirty);
   refreshSnapshot();
   updateDirty();
 
   // 保存设置（通用 + 模型 + 检索）
   document.getElementById('settings-form').addEventListener('submit', async function (e) {
     e.preventDefault();
-    var llmModel = currentModel();
+    var llmModel = llmModelCtl.value();
     if (!llmModel || llmModel === '__custom__') {
       showMsg('请选择或输入对话/整理模型。', true);
+      return;
+    }
+    var searchModel = searchModelCtl.value();
+    if (!searchModel || searchModel === '__custom__') {
+      showMsg('请选择或输入联网搜索模型。', true);
       return;
     }
     var body = {
@@ -367,6 +404,7 @@
       default_category: document.getElementById('default-category').value,
       llm_provider: document.getElementById('llm-provider').value,
       llm_model: llmModel,
+      search_model: searchModel,
       embed_model: document.getElementById('embed-model').value.trim(),
       vector_top_k: parseInt(document.getElementById('vector-top-k').value, 10),
       fts_top_k: parseInt(document.getElementById('fts-top-k').value, 10),
@@ -383,7 +421,8 @@
       var data = await resp.json().catch(function () { return {}; });
       if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
       // 保存成功：收拢自定义输入并重置「已修改但未保存」基线
-      if (modelCustomWrap.classList.contains('show')) commitCustomModel();
+      llmModelCtl.commit();  // 若自定义输入未收拢先按提交值收拢（内部判断）
+      searchModelCtl.commit();
       refreshSnapshot();
       updateDirty();
       showMsg('设置已保存。');

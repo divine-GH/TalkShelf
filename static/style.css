@@ -168,7 +168,7 @@ details.section[open] > summary { margin-bottom: 10px; }
   background: var(--card);
 }
 .set-row input[type="checkbox"] { width: 22px; height: 22px; flex-shrink: 0; }
-/* 禁用项（联网搜索模型：暂不支持修改） */
+/* 禁用项（联网搜索提供商固定 DeepSeek） */
 .set-row input[disabled], .set-row select[disabled] {
   color: var(--muted);
   background: var(--bg);

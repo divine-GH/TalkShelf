@@ -1150,6 +1150,7 @@ def settings_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLRe
             "categories": config.CATEGORIES,
             "providers": providers.options(),
             "llm_model_default": config.LLM_MODEL,  # 设置页「（默认值）」标注用（§30）
+            "search_model_default": config.SEARCH_MODEL,  # 联网搜索模型 .env 默认（同上）
             "s": settings.effective(conn),
         },
     )

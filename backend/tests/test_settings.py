@@ -2,13 +2,15 @@
 
 - GET /settings：设置页渲染（通用/模型/检索/数据管理/安全/关于区块，服务端渲染生效值）；
 - 模型配置/检索配置默认折叠（<details> 不带 open）；模型配置含对话整理/Ollama/联网搜索三个子块，
-  联网搜索模型只读（仅 DeepSeek + 暂不支持修改）；
+  联网搜索提供商固定 DeepSeek（下拉禁用），搜索模型可选（select + 自定义入口，§31）；
 - 设置页手动保存流程（§30）：每项带「已修改但未保存」标注、自定义模型含确认/取消按钮、
   DEFAULT_LLM_MODEL（「（默认值）」标注用）、提示文案不再声称改完立即生效；
 - 顶栏导航：「记录」「检索」「更多功能」三按钮并排一行，其余功能收进折叠菜单；
 - 更名：「笔记」→「浏览笔记」、「问答」→「检索」、「回顾」→「兴趣回顾」；
 - /static 静态资源带 Cache-Control: no-cache（浏览器每次重新校验，UI 改动即时生效）。
 """
+
+from app import config
 
 
 def test_settings_page_html(client):
@@ -41,13 +43,18 @@ def test_settings_page_html(client):
         'id="embed-model"',
         'id="search-provider"',
         'id="search-model"',
-        "暂不支持修改",
+        'id="search-model-custom"',  # 联网搜索模型可选：自定义模型输入
+        'id="search-model-custom-wrap"',
+        'id="search-custom-ok"',  # 联网搜索模型「确认」按钮
+        'id="search-custom-cancel"',  # 联网搜索模型「取消」按钮
+        'id="search-model-list-msg"',
         'class="set-dirty"',  # 「已修改但未保存」标注
         'DEFAULT_LLM_MODEL = "deepseek-chat"',  # .env 默认模型（下拉「（默认值）」标注用）
         "修改后需点击「保存设置」才生效",  # 手动保存提示（不再声称立即生效）
     ):
         assert fragment in resp.text, f"设置页缺少: {fragment}"
     assert "改完立即生效" not in resp.text, "设置页不应再声称改完立即生效"
+    assert "暂不支持修改" not in resp.text, "设置页不应再出现「暂不支持修改」（搜索模型已可选）"
     # 模型配置/检索配置默认折叠：<details> 不带 open 属性
     for tag in (
         '<details class="section" id="model-cfg">',
@@ -56,8 +63,9 @@ def test_settings_page_html(client):
         assert tag in resp.text, f"缺少折叠分区: {tag}"
     assert 'id="model-cfg" open' not in resp.text, "模型配置应默认折叠"
     assert 'id="retrieval-cfg" open' not in resp.text, "检索配置应默认折叠"
-    # 联网搜索模型只读：提供商只有 DeepSeek 一项且 select 禁用
+    # 联网搜索：提供商固定 DeepSeek（select 禁用），模型可选（select 不带 disabled）
     assert '<select id="search-provider" disabled>' in resp.text
+    assert '<select id="search-model">' in resp.text
     # 登录未启用时密码区是提示而非表单
     assert "配置 AUTH_PASSWORD 后即可在此修改密码" in resp.text
     assert 'id="old-password"' not in resp.text
@@ -97,6 +105,31 @@ def test_settings_page_renders_effective_values(client, conn):
     import re
 
     assert not re.search(r'id="weekly-llm"[^>]*checked', html)
+
+
+def test_search_model_selectable(client):
+    """联网搜索模型可选（§31）：PUT search_model 生效并渲染为下拉选中项；
+    提供商仍固定 DeepSeek（下拉禁用仅一项）。"""
+    import re
+
+    # 默认：search-model 下拉渲染当前生效模型为选中项
+    html = client.get("/settings").text
+    m = re.search(r'id="search-model">(.*?)</select>', html, re.DOTALL)
+    assert m, "设置页缺少 search-model 下拉"
+    assert f'value="{config.SEARCH_MODEL}" selected' in m.group(1)
+    # 保存新搜索模型后刷新：下拉选中新值，且 select 不禁用（模型可选）
+    resp = client.put("/api/settings", json={"search_model": "deepseek-v4-flash"})
+    assert resp.status_code == 200
+    html = client.get("/settings").text
+    m = re.search(r'id="search-model">(.*?)</select>', html, re.DOTALL)
+    assert m, "设置页缺少 search-model 下拉"
+    sel = m.group(1)
+    assert 'value="deepseek-v4-flash" selected' in sel
+    assert "disabled" not in sel
+    # 提供商仍固定 DeepSeek：select 禁用、仅一项
+    assert '<select id="search-provider" disabled>' in html
+    # 自定义入口：下拉含「自定义模型…」
+    assert "自定义模型…" in sel
 
 
 def test_topbar_nav_restructure(client):
