@@ -1,0 +1,36 @@
+"""设置页与顶栏导航测试（UI 重构：顶栏只留「记录」「检索」+「更多功能」折叠，设置页占位）。
+
+- GET /settings：占位页渲染（关于/版本信息），与其它页面一样受登录保护；
+- 顶栏导航：只留「记录」「检索」两个主按钮，其余功能收进「更多功能」折叠菜单；
+- 更名：「笔记」→「浏览全部笔记」、「问答」→「检索」。
+"""
+
+
+def test_settings_page_html(client):
+    resp = client.get("/settings")
+    assert resp.status_code == 200
+    for fragment in ("设置", "关于", "正在规划中", "note-brain — 个人知识速记工具", "当前版本 v"):
+        assert fragment in resp.text, f"设置页缺少: {fragment}"
+
+
+def test_topbar_nav_restructure(client):
+    """顶栏只留「记录」「检索」，其余功能收进「更多功能」折叠（默认收起）。"""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    # 新顶栏：两个主按钮 + 折叠菜单（含全部功能入口）
+    for fragment in (
+        ">记录<",
+        ">检索<",
+        ">更多功能<",
+        ">浏览全部笔记<",
+        ">回顾<",
+        ">统计<",
+        ">设置<",
+        'href="/ask"',
+        'href="/settings"',
+        'id="more-drop" hidden',  # 折叠菜单默认收起
+    ):
+        assert fragment in resp.text, f"顶栏缺少: {fragment}"
+    # 旧导航标签已消失（独立导航位被折叠菜单取代）
+    assert ">笔记</a>" not in resp.text
+    assert ">问答</a>" not in resp.text

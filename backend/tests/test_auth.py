@@ -32,6 +32,7 @@ def test_login_disabled_by_default(client, llm_ok):
     """未配置 AUTH_PASSWORD：登录端点 403，页面与 API 免鉴权可访问。"""
     assert client.post("/api/login", json={"password": "x"}).status_code == 403
     assert client.get("/notes").status_code == 200
+    assert client.get("/settings").status_code == 200
     assert client.get("/api/notes").status_code == 200
 
 
@@ -43,6 +44,7 @@ def test_login_disabled_by_default(client, llm_ok):
 def test_pages_redirect_and_api_401_when_logged_out(client, auth_on):
     resp = client.get("/notes", follow_redirects=False)
     assert resp.status_code == 303 and "/login" in resp.headers["location"]
+    assert client.get("/settings", follow_redirects=False).status_code == 303
     assert client.get("/api/notes").status_code == 401
     assert client.get("/", follow_redirects=False).status_code == 303  # 页面一律重定向
 
@@ -55,6 +57,7 @@ def test_login_success_sets_cookie_and_grants_access(client, auth_on):
     assert resp.headers.get("set-cookie", "").lower().find("httponly") >= 0
     assert client.get("/api/notes").status_code == 200
     assert client.get("/notes").status_code == 200
+    assert client.get("/settings").status_code == 200
 
 
 def test_login_wrong_password(client, auth_on):

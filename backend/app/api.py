@@ -954,6 +954,14 @@ def stats_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLRespo
     return render(request, "stats.html", {**data, "active": "stats"})
 
 
+@router.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, _sess: PageAuthDep) -> HTMLResponse:
+    """设置页（占位符：暂无实际设置项，仅展示关于/版本信息）。"""
+    return render(
+        request, "settings.html", {"active": "settings", "app_version": config.APP_VERSION}
+    )
+
+
 @router.get("/notes/{note_id}", response_class=HTMLResponse)
 def note_detail_page(
     request: Request, note_id: int, conn: ConnDep, _sess: PageAuthDep

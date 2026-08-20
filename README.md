@@ -13,13 +13,13 @@
 - **直存降级**：DeepSeek 不可用时原文照常入库（pending），恢复后自动补整理（退避 5 次 → failed）
 - **Ollama embedding**（bge-m3）：向量化入库、启动扫描补算；Ollama 挂时检索自动降级 FTS-only、查重退 FTS 近似版
 - **查重**（向量版）：命中标 duplicate 并记录目标 id（duplicate_of），Web 端提示"疑似重复于 #id"
-- **Web 问答页**：向量 + FTS + RRF 融合 + 材料层兜底召回 → LLM 作答带引用（点击跳转原笔记）
-- **笔记列表页**：分类浏览、kind 筛选、关键词搜索（FTS + 双字词 LIKE 兜底）、分页
+- **Web 检索页**：向量 + FTS + RRF 融合 + 材料层兜底召回 → LLM 作答带引用（点击跳转原笔记）
+- **浏览页**（笔记列表）：分类浏览、kind 筛选、关键词搜索（FTS + 双字词 LIKE 兜底）、分页
 - **回顾页**：兴趣清单两分区（未决策：去做/留着/放弃；进行中：稍后/转收藏/删除）
 - **笔记详情页**（M3）：完整编辑（保存触发重整理：重算向量/重建 FTS/重新查重）、修正对话入口、来源对话展开、合并/忽略交互（合并含 merged 出索引）、重新整理、删除
 - **登录**（M3）：`.env` 配 `AUTH_PASSWORD` 即全局启用（argon2 + SQLite session + 失败限速 + CSRF）
 - **统计页 + 每周总结**（M3）：分类/标签/时间分布；LLM 生成周报（失败降级纯统计）
-- 92 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
+- 94 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
 
 ## 登录（M3，可选）
 
@@ -91,7 +91,7 @@ backend/app/        config（§3.4 配置收集）| db（建表+FTS 同步+迁�
                     notes（落库业务 + 合并/忽略/更新/重整理）| api（端点+页面路由）| main（入口，单 worker）
                     data/（种子笔记 + rag_eval_set.json 检索评测集）
 backend/tests/      pytest（LLM/embedding mock；登录/详情/统计测试）
-templates/          Jinja2 页面（记录/笔记/详情/问答/回顾/统计/登录，移动端优先，中文）
+templates/          Jinja2 页面（记录/浏览/详情/检索/回顾/统计/设置/登录，移动端优先，中文）
 static/             样式与少量原生 JS（含 fetch 自动带 CSRF 头）
 scripts/            eval_retrieval.py（检索回归评测）| smoke_e2e.py（真实端到端冒烟，含 M3 链路）
                     smoke_deepseek_search.py（原生搜索冒烟）

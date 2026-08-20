@@ -14,10 +14,16 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 
 ### Added
 
+- **设置页（占位）**：`/settings` 占位页（关于/版本信息），入口在顶栏「更多功能」折叠菜单；与其它页面一样受登录保护。
 - **版本管理基础设施**：`CHANGELOG.md`（本文件）+ git tag（v0.1.0/v0.2.0/v0.3.0）+ `config.APP_VERSION` +
   `GET /api/version`（免登录，部署探活 / 确认线上版本用）。
 - **开发工具链**：引入 ruff（lint `ruff check` + format `ruff format`，配置见 `ruff.toml`，默认规则集 + line-length 100）；
   测试/开发依赖拆分到 `requirements-dev.txt`（pytest 移出运行时依赖）。
+
+### Changed
+
+- **顶栏重构**：只留「记录」「检索」两个主按钮，其余功能收进「更多功能」折叠菜单（浏览全部笔记/回顾/统计/设置，退出登录也移入）；
+  「笔记」更名「浏览（全部笔记）」，「问答」更名「检索」（URL 不变，`/notes`、`/ask`）。
 
 ### Fixed
 

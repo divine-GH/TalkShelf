@@ -22,7 +22,7 @@
   };
 })();
 
-// 退出登录（导航栏链接，登录启用时存在）
+// 退出登录（「更多功能」菜单内链接，登录启用时存在）
 document.addEventListener('click', function (e) {
   var link = e.target.closest && e.target.closest('#logout-link');
   if (!link) return;
@@ -32,4 +32,25 @@ document.addEventListener('click', function (e) {
   }).catch(function () {
     location.href = '/login';
   });
+});
+
+// 「更多功能」下拉菜单：点按钮开合，点菜单外 / Esc 关闭
+function setMoreMenu(open) {
+  var drop = document.getElementById('more-drop');
+  var btn = document.getElementById('more-btn');
+  if (!drop || !btn) return;
+  drop.hidden = !open;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+document.addEventListener('click', function (e) {
+  var menu = document.getElementById('more-menu');
+  if (!menu || !e.target.closest) return;
+  if (e.target.closest('#more-btn')) {
+    setMoreMenu(document.getElementById('more-drop').hidden);
+    return;
+  }
+  if (!menu.contains(e.target)) setMoreMenu(false);
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') setMoreMenu(false);
 });

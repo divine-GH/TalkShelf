@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}设置 — note-brain{% endblock %}
+
+{% block content %}
+<h1>设置</h1>
+
+<section class="section">
+  <h2>通用</h2>
+  <p class="hint">设置功能正在规划中，暂时没有可配置的选项，敬请期待。</p>
+  <div class="note-item">
+    <p class="empty">这里以后会放：每周总结开关、默认分类、模型与检索相关配置等。</p>
+  </div>
+</section>
+
+<section class="section">
+  <h2>关于</h2>
+  <div class="note-item">
+    <p>note-brain — 个人知识速记工具</p>
+    <p class="note-meta">当前版本 v{{ app_version }}</p>
+  </div>
+</section>
+{% endblock %}
