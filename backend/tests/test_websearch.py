@@ -12,6 +12,7 @@ import sqlite3
 
 from app import fetch, llm, web_search
 from app.fetch import FetchResult
+from conftest import conv_last_message, wait_for
 
 SEARCH_ITEMS = [
     {"url": "https://example.com/a", "title": "结果A", "page_age": "2026-08-19"},
@@ -38,6 +39,8 @@ def test_search_injected_and_materialized(client, llm_ok, db_path, monkeypatch):
     conv_id = client.post("/api/conversations", json={"message": "查一下 frp 最新版本"}).json()[
         "conversation_id"
     ]
+    # §32：后台异步处理，等回复落库后 search_result 必已注入
+    wait_for(lambda: conv_last_message(client, conv_id).get("role") == "assistant", desc="对话回复")
 
     resp = client.get(f"/api/conversations/{conv_id}").json()
     sr = [m for m in resp["messages"] if m["kind"] == "search_result"]
@@ -81,10 +84,10 @@ def test_search_failure_degraded(client, llm_ok, monkeypatch):
     )
     resp = client.post("/api/conversations", json={"message": "查一下 DeepSeek 新闻"})
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["searched"] is False
-    assert data["degraded"] is False, "搜索失败不影响对话"
-    resp = client.get(f"/api/conversations/{data['conversation_id']}").json()
+    conv_id = resp.json()["conversation_id"]
+    # §32：LLM 回复后台异步生成，轮询等待完成后断言
+    wait_for(lambda: conv_last_message(client, conv_id).get("role") == "assistant", desc="对话回复")
+    resp = client.get(f"/api/conversations/{conv_id}").json()
     assert not any(m["kind"] == "search_result" for m in resp["messages"])
 
 
@@ -114,6 +117,11 @@ def test_web_fetch_tool_loop(client, llm_ok, db_path, monkeypatch):
     conv_id = client.post("/api/conversations", json={"message": "查一下 frp 文档"}).json()[
         "conversation_id"
     ]
+    # §32：后台异步处理，轮询等待工具循环完成（第一轮工具调用 + 第二轮最终回复）
+    wait_for(lambda: calls["n"] == 2, desc="工具循环两轮 LLM 调用")
+    wait_for(
+        lambda: conv_last_message(client, conv_id).get("role") == "assistant", desc="最终回复落库"
+    )
     assert calls["n"] == 2, "第一轮工具调用 + 第二轮最终回复"
 
     resp = client.get(f"/api/conversations/{conv_id}").json()
@@ -172,9 +180,10 @@ def test_web_fetch_tool_loop_cap(client, llm_ok, monkeypatch):
 
     resp = client.post("/api/conversations", json={"message": "查一下 xxx"})
     assert resp.status_code == 200, "达上限后正常返回（LLM 最后输出被截断也无妨）"
+    # §32：后台异步处理，轮询等待工具循环达上限
+    wait_for(lambda: calls["n"] == 1 + 3, desc="初始 1 次 + 上限 3 轮续调")
     assert calls["n"] == 1 + 3, "初始 1 次 + 上限 3 轮续调"
     assert fetches["n"] == 3, "工具执行次数 = 上限"
-    assert resp.json()["reply"] == "", "无最终文本时返回空串而非报错"
 
 
 def test_web_fetch_failure_passthrough(client, llm_ok, monkeypatch):
@@ -207,5 +216,6 @@ def test_web_fetch_failure_passthrough(client, llm_ok, monkeypatch):
     conv_id = client.post("/api/conversations", json={"message": "查一下 frp"}).json()[
         "conversation_id"
     ]
+    wait_for(lambda: conv_last_message(client, conv_id).get("role") == "assistant", desc="对话回复")
     resp = client.get(f"/api/conversations/{conv_id}").json()
     assert not any(m["kind"] == "fetched_page" for m in resp["messages"]), "失败抓取不落库"

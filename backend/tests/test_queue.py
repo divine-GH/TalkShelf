@@ -2,7 +2,7 @@
 
 import json
 
-from conftest import note_status, wait_for
+from conftest import conv_last_message, note_status, wait_for
 
 
 def test_direct_create_note_pending_then_processed(client, llm_ok, db_path):
@@ -42,10 +42,18 @@ def test_degraded_confirm_goes_pending_then_recovers(client, llm_down, db_path, 
     conv_id = client.post("/api/conversations", json={"message": "DeepSeek 挂了也能记"}).json()[
         "conversation_id"
     ]
-    # 对话中 LLM 挂：降级提示
+    # 对话中 LLM 挂：后台降级提示（§32 异步生成，轮询等待）
+    wait_for(
+        lambda: "AI 整理服务暂不可用" in conv_last_message(client, conv_id).get("content", ""),
+        desc="后台降级提示",
+    )
     resp = client.post(f"/api/conversations/{conv_id}/messages", json={"message": "再补一句"})
-    assert resp.json()["degraded"] is True
-    # 拍板 → 直存 pending
+    assert resp.status_code == 200
+    wait_for(
+        lambda: "AI 整理服务暂不可用" in conv_last_message(client, conv_id).get("content", ""),
+        desc="第二轮降级提示（连发消息自动续轮）",
+    )
+    # 拍板 → 直存 pending（confirm 仍同步返回 degraded 提示）
     resp = client.post(f"/api/conversations/{conv_id}/confirm", json={"kind": "note"})
     assert resp.status_code == 200
     assert resp.json()["degraded"] is True

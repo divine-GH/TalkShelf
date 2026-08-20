@@ -142,7 +142,22 @@ def note_status(path, note_id):
     return row
 
 
+def conv_last_message(client, conv_id) -> dict:
+    """对话最后一条消息（§32 异步回复：测试轮询等待用）。"""
+    msgs = client.get(f"/api/conversations/{conv_id}").json()["messages"]
+    return msgs[-1] if msgs else {}
+
+
 def start_conversation(client, message: str) -> int:
+    """发起对话并等待后台 LLM 回复落库（§32：POST 立即返回，回复异步生成）。"""
     resp = client.post("/api/conversations", json={"message": message})
     assert resp.status_code == 200, resp.text
-    return resp.json()["conversation_id"]
+    conv_id = resp.json()["conversation_id"]
+    wait_for(
+        lambda: (
+            conv_last_message(client, conv_id).get("role") == "assistant"
+            and conv_last_message(client, conv_id).get("kind") == "text"
+        ),
+        desc=f"对话 #{conv_id} LLM 回复",
+    )
+    return conv_id

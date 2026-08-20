@@ -5,7 +5,7 @@
 
 import pytest
 from app import fetch
-from app.api import extract_urls
+from app.fetch import extract_urls
 
 # ---------------------------------------------------------------------------
 # SSRF 防护（无网络动作）

@@ -1,8 +1,8 @@
-"""对话式记录全流程测试（设计文档 §4.3 / §6.4 / §12 M1 测试约定）。"""
+"""对话式记录全流程测试（设计文档 §4.3 / §6.4 / §12 M1 测试约定；§32 起回复异步生成）。"""
 
 import json
 
-from conftest import start_conversation
+from conftest import conv_last_message, start_conversation, wait_for
 
 
 def test_conversation_confirm_flow(client, llm_ok, db_path):
@@ -180,3 +180,76 @@ def test_correction_conversation_updates_note(client, llm_ok, db_path):
     assert "其实应该改一下分类" in note["raw"]
     assert note["title"] == "nginx 上传大文件限制"
     assert conv2_row["status"] == "archived" and conv2_row["note_id"] == note_id
+
+
+def test_create_conversation_returns_before_reply(client, llm_ok, monkeypatch):
+    """§32：POST /api/conversations 立即返回（不等 LLM）；回复后台异步到达。"""
+    import time
+
+    from app import llm
+
+    def slow_chat(messages, **kwargs):
+        time.sleep(0.3)
+        return json.dumps(llm_ok, ensure_ascii=False)
+
+    monkeypatch.setattr(llm, "_call_chat", slow_chat)
+    resp = client.post("/api/conversations", json={"message": "慢速整理测试"})
+    assert resp.status_code == 200, resp.text
+    assert set(resp.json()) == {"conversation_id"}, "立即返回，不再含 reply/organized 等同步字段"
+    conv_id = resp.json()["conversation_id"]
+
+    # 此刻回复尚未生成：最后一条是用户消息（对话页据此显示「思考中…」）
+    msgs = client.get(f"/api/conversations/{conv_id}").json()["messages"]
+    assert msgs[-1]["role"] == "user"
+
+    # 稍后回复自动到达
+    wait_for(lambda: conv_last_message(client, conv_id).get("role") == "assistant", desc="异步回复")
+    msgs = client.get(f"/api/conversations/{conv_id}").json()["messages"]
+    assert msgs[-1]["kind"] == "text"
+
+
+def test_consecutive_messages_get_two_replies(client, llm_ok, monkeypatch):
+    """§32：LLM 回复前连发消息 → 后台自动续轮，两条消息各得到一次回复。"""
+    import time
+
+    from app import llm
+
+    calls = {"n": 0}
+
+    def slow_chat(messages, **kwargs):
+        calls["n"] += 1
+        time.sleep(0.1)
+        return json.dumps(llm_ok, ensure_ascii=False)
+
+    monkeypatch.setattr(llm, "_call_chat", slow_chat)
+    conv_id = start_conversation(client, "第一段")
+    resp = client.post(f"/api/conversations/{conv_id}/messages", json={"message": "第二段"})
+    assert resp.status_code == 200
+    wait_for(lambda: calls["n"] >= 2, desc="两轮 LLM 调用")
+    wait_for(
+        lambda: conv_last_message(client, conv_id).get("role") == "assistant", desc="第二轮回复"
+    )
+    msgs = client.get(f"/api/conversations/{conv_id}").json()["messages"]
+    text_count = sum(1 for m in msgs if m["role"] == "assistant" and m["kind"] == "text")
+    assert text_count == 2
+
+
+def test_chat_page_shows_thinking_while_pending(client, llm_ok, monkeypatch):
+    """§32：对话页 LLM 未回复时显示「思考中…」，回复到达后消失。"""
+    import time
+
+    from app import llm
+
+    def slow_chat(messages, **kwargs):
+        time.sleep(0.4)
+        return json.dumps(llm_ok, ensure_ascii=False)
+
+    monkeypatch.setattr(llm, "_call_chat", slow_chat)
+    conv_id = client.post("/api/conversations", json={"message": "等一会儿再整理的内容"}).json()[
+        "conversation_id"
+    ]
+    page = client.get(f"/conversations/{conv_id}").text
+    assert 'id="thinking"' in page, "LLM 未回复时对话页渲染思考中气泡"
+    wait_for(lambda: conv_last_message(client, conv_id).get("role") == "assistant", desc="回复到达")
+    page = client.get(f"/conversations/{conv_id}").text
+    assert 'id="thinking"' not in page, "回复到达后思考中气泡消失"

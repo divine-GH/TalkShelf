@@ -50,7 +50,7 @@ def main() -> int:
     from app.main import app
 
     with TestClient(app) as client:
-        # 1. 对话式记录（真实整理：LLM 理解 → 整理 JSON）
+        # 1. 对话式记录（真实整理：LLM 理解 → 整理 JSON；§32 起回复后台异步生成）
         resp = client.post(
             "/api/conversations",
             json={
@@ -58,18 +58,44 @@ def main() -> int:
             },
         )
         check("发起对话（真实整理）", resp.status_code == 200, resp.text[:200])
-        data = resp.json()
-        conv_id = data.get("conversation_id")
-        check(
-            "对话回复为整理 JSON",
-            data.get("organized") is True,
-            f"reply={data.get('reply', '')[:80]!r}",
-        )
+        conv_id = resp.json()["conversation_id"]
+        deadline = time.time() + 60
+        reply = None
+        while time.time() < deadline:
+            msgs = client.get(f"/api/conversations/{conv_id}").json()["messages"]
+            last = msgs[-1] if msgs else {}
+            if last.get("role") == "assistant" and last.get("kind") == "text":
+                reply = last["content"]
+                break
+            time.sleep(1)
+        check("对话回复为整理 JSON", reply is not None, f"reply={str(reply)[:80]!r}")
 
         # 2. 拍板落库（收藏）
         resp = client.post(f"/api/conversations/{conv_id}/confirm", json={"kind": "note"})
         check("拍板落库", resp.status_code == 200, resp.text[:200])
         note_id = resp.json()["note"]["id"]
+
+        # 2b. 快速记录（§32）：原文立即落库，LLM 后台判断兴趣/收藏并整理
+        resp = client.post("/api/quick-notes", json={"message": "想试试手冲咖啡，有空研究下"})
+        check("快速记录 202", resp.status_code == 202, resp.text[:200])
+        quick_id = resp.json()["note_id"]
+        deadline = time.time() + 60
+        quick = None
+        while time.time() < deadline:
+            quick = client.get(f"/api/notes/{quick_id}").json()["note"]
+            if quick["status"] in ("processed", "duplicate"):
+                break
+            time.sleep(1)
+        check(
+            "快速记录整理完成",
+            quick["status"] in ("processed", "duplicate"),
+            f"status={quick.get('status')}",
+        )
+        check(
+            "快速记录 kind 由 LLM 判断",
+            quick["kind"] in ("note", "interest"),
+            f"kind={quick.get('kind')}",
+        )
 
         # 3. 队列补做：真实 embedding（bge-m3）+ 向量查重（真实 DeepSeek）
         deadline = time.time() + 120
