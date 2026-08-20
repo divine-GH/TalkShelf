@@ -10,6 +10,14 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.7.2] - 2026-08-20
+
+### Fixed
+
+- **设置页「已修改但未保存」黄色圆点恒显示**：圆点样式 `display: inline-block` 覆盖了浏览器对
+  `hidden` 属性的默认隐藏，导致未改动设置时圆点也显示；补回 `.set-dirty[hidden] { display: none; }`，
+  恢复「仅改动未保存项显示圆点、保存成功后消失」的预期行为（§33）。
+
 ## [0.7.1] - 2026-08-20
 
 ### Changed
