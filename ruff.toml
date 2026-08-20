@@ -1,0 +1,19 @@
+# ruff 配置（lint + format）——使用方式见 README「代码规范」章节
+# 规则策略：采用 ruff 0.16 默认规则集（F pyflakes + pycodestyle 子集 + UP/DTZ/RUF/ISC/I 等），
+# 抓确定错误（未使用导入/变量、未定义名字、过时写法、时区陷阱）与 import 排序；
+# 以后要更严（如 B bugbear、ANN 类型注解）再扩展 select。
+
+# 行宽：项目中文注释/文档字符串多，统一 100。
+# 注：ruff format 不重排字符串与注释内容，只会排版可拆分的代码结构。
+line-length = 100
+target-version = "py314"
+
+[lint]
+# 默认规则已启用；扩展位示例（启用前先看 README 说明）：
+# select = ["E", "F", "UP", "I", "B"]
+# auth.py 的时间处理是「naive 本地时间 + SQLite datetime('now','localtime')」的刻意设计
+# （§4 存本地时间字符串、相互比较自洽；改 aware 需同步改存储格式，超出 lint 范畴）：
+per-file-ignores = { "backend/app/auth.py" = ["DTZ005", "DTZ007"] }
+
+[format]
+quote-style = "double"

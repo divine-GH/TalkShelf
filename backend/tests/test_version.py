@@ -1,6 +1,6 @@
 """GET /api/version：版本探活端点（免登录，登录启用时也不拦截——部署探活/确认线上版本用）。"""
-import pytest
 
+import pytest
 from app import auth, config
 
 

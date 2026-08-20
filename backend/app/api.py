@@ -4,6 +4,7 @@ M1 端点：conversations 六件套、POST /api/notes（快捷直存）、GET /a
 页面：首页（记录对话入口 + 最近笔记 + 草稿）、聊天页、笔记列表页。
 M2+ 再补：/api/ask、/api/review、/api/notes/{id}（详情/PUT/DELETE）、/api/stats、export/import、登录。
 """
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from . import auth, config, db, fetch, llm, notes, queue as queue_mod, retrieval, web_search
+from . import auth, config, db, fetch, llm, notes, retrieval, web_search
+from . import queue as queue_mod
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,7 @@ TEMPLATES.env.autoescape = True  # Starlette 默认不开 autoescape，必须显
 # ---------------------------------------------------------------------------
 # 依赖
 # ---------------------------------------------------------------------------
+
 
 def get_conn() -> sqlite3.Connection:
     conn = db.connect()
@@ -183,7 +186,9 @@ def _step_conversation(conn: sqlite3.Connection, conv_id: int, message: str) -> 
     # 有搜索结果时声明 web_fetch 工具：LLM 可主动跟进抓全文（§6.6/§22.3）
     tools = [llm.WEB_FETCH_TOOL] if searched else None
     try:
-        reply = llm.organize_conversation(_history(conn, conv_id), context_note=context_note, tools=tools)
+        reply = llm.organize_conversation(
+            _history(conn, conv_id), context_note=context_note, tools=tools
+        )
     except llm.LLMError as e:
         logger.warning("LLM 不可用，对话降级直存模式: %s", e)
         degraded = "（AI 整理服务暂不可用：对话可继续，或直接拍板原文保存，稍后自动补整理。）"
@@ -205,11 +210,18 @@ def _step_conversation(conn: sqlite3.Connection, conv_id: int, message: str) -> 
         (conv_id, reply["text"]),
     )
     conn.commit()
-    return {"reply": reply["text"], "organized": reply["organized"] is not None,
-            "degraded": False, "fetched": fetched_urls, "searched": searched}
+    return {
+        "reply": reply["text"],
+        "organized": reply["organized"] is not None,
+        "degraded": False,
+        "fetched": fetched_urls,
+        "searched": searched,
+    }
 
 
-def _confirm(conn: sqlite3.Connection, conv_id: int, kind: str, rq: queue_mod.ReprocessQueue) -> dict:
+def _confirm(
+    conn: sqlite3.Connection, conv_id: int, kind: str, rq: queue_mod.ReprocessQueue
+) -> dict:
     """拍板落库：优先用对话中已生成的整理 JSON；没有则强制整理一次；失败直存 pending。"""
     conv = _fetch_conversation(conn, conv_id)
     if conv["status"] != "draft":
@@ -218,7 +230,9 @@ def _confirm(conn: sqlite3.Connection, conv_id: int, kind: str, rq: queue_mod.Re
     organized = notes.latest_organized(msgs)
     degraded = False
     if organized is None:
-        context_note = db.fetch_note(conn, conv["context_note_id"]) if conv["context_note_id"] else None
+        context_note = (
+            db.fetch_note(conn, conv["context_note_id"]) if conv["context_note_id"] else None
+        )
         try:
             organized = llm.organize_conversation(
                 _history(conn, conv_id), context_note=context_note, force_json=True
@@ -249,6 +263,7 @@ def _confirm(conn: sqlite3.Connection, conv_id: int, kind: str, rq: queue_mod.Re
 # 版本信息（发版约定：config.APP_VERSION bump → CHANGELOG.md 追加 → git tag）
 # ---------------------------------------------------------------------------
 
+
 @router.get("/api/version")
 def version_info() -> dict:
     """应用版本与名称。免登录：部署探活 / 确认线上跑的是哪个版本（不泄露业务数据）。"""
@@ -258,6 +273,7 @@ def version_info() -> dict:
 # ---------------------------------------------------------------------------
 # 对话端点
 # ---------------------------------------------------------------------------
+
 
 @router.post("/api/conversations")
 def create_conversation(body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
@@ -283,7 +299,9 @@ def add_message(conv_id: int, body: dict, conn: ConnDep, _auth: ApiAuthDep) -> d
 
 
 @router.post("/api/conversations/{conv_id}/confirm")
-def confirm_conversation(conv_id: int, body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
+def confirm_conversation(
+    conv_id: int, body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep
+) -> dict:
     kind = body.get("kind")
     if kind not in ("note", "interest"):
         raise HTTPException(status_code=422, detail="kind 须为 note 或 interest")
@@ -332,13 +350,19 @@ def get_conversation(conv_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
         }
         for m in _conv_messages(conn, conv_id)
     ]
-    return {"id": conv["id"], "status": conv["status"], "context_note_id": conv["context_note_id"],
-            "created_at": conv["created_at"], "messages": msgs}
+    return {
+        "id": conv["id"],
+        "status": conv["status"],
+        "context_note_id": conv["context_note_id"],
+        "created_at": conv["created_at"],
+        "messages": msgs,
+    }
 
 
 # ---------------------------------------------------------------------------
 # 笔记端点
 # ---------------------------------------------------------------------------
+
 
 @router.post("/api/notes", status_code=202)
 def create_note(body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
@@ -418,8 +442,10 @@ def query_notes(
     ).fetchall()
     items = []
     for r in rows:
-        tags = [t["tag"] for t in conn.execute(
-            "SELECT tag FROM tags WHERE note_id = ? ORDER BY tag", (r["id"],))]
+        tags = [
+            t["tag"]
+            for t in conn.execute("SELECT tag FROM tags WHERE note_id = ? ORDER BY tag", (r["id"],))
+        ]
         items.append(db.note_to_dict(r, tags))
     return {
         "items": items,
@@ -449,6 +475,7 @@ def list_notes(
 #   进行中（done_at 非空）：稍后 → 清 done_at 回未决策；转收藏 → kind 改 note（done_at 保留作历史）
 # ---------------------------------------------------------------------------
 
+
 def _fetch_note_or_404(conn: sqlite3.Connection, note_id: int) -> sqlite3.Row:
     row = conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
     if not row:
@@ -470,8 +497,10 @@ def review_list(conn: ConnDep, _auth: ApiAuthDep) -> dict:
     pending, in_progress = [], []
     for r in rows:
         d = dict(r)
-        d["tags"] = [t["tag"] for t in conn.execute(
-            "SELECT tag FROM tags WHERE note_id = ? ORDER BY tag", (r["id"],))]
+        d["tags"] = [
+            t["tag"]
+            for t in conn.execute("SELECT tag FROM tags WHERE note_id = ? ORDER BY tag", (r["id"],))
+        ]
         (in_progress if r["done_at"] else pending).append(d)
     return {"pending": pending, "in_progress": in_progress}
 
@@ -481,9 +510,7 @@ def note_done(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     """兴趣条目「去做」：置 done_at=now，进入进行中分区（§4.2）。"""
     row = _fetch_note_or_404(conn, note_id)
     _interest_or_409(row)
-    conn.execute(
-        "UPDATE notes SET done_at = datetime('now','localtime') WHERE id = ?", (note_id,)
-    )
+    conn.execute("UPDATE notes SET done_at = datetime('now','localtime') WHERE id = ?", (note_id,))
     conn.commit()
     return {"note_id": note_id, "done_at": db.fetch_note(conn, note_id)["done_at"]}
 
@@ -527,13 +554,18 @@ def delete_note(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> JSONResponse:
 # 笔记详情端点（M3，设计文档 §8 详情页 / §6.2 合并忽略 / §5 PUT、reprocess）
 # ---------------------------------------------------------------------------
 
+
 def _note_detail(conn: sqlite3.Connection, note_id: int) -> dict:
     """详情数据：笔记 + 查重目标 + 来源对话（archived 且 note_id 关联，含修正对话）。"""
     note = db.fetch_note(conn, note_id)
     if not note:
         raise HTTPException(status_code=404, detail="笔记不存在")
-    note["entities"] = [dict(e) for e in conn.execute(
-        "SELECT type, name FROM entities WHERE note_id = ? ORDER BY name", (note_id,))]
+    note["entities"] = [
+        dict(e)
+        for e in conn.execute(
+            "SELECT type, name FROM entities WHERE note_id = ? ORDER BY name", (note_id,)
+        )
+    ]
     dup_target = None
     if note.get("duplicate_of"):
         t = db.fetch_note(conn, note["duplicate_of"])
@@ -546,10 +578,13 @@ def _note_detail(conn: sqlite3.Connection, note_id: int) -> dict:
         (note_id,),
     ).fetchall()
     for c in convs:
-        msgs = [dict(m) for m in conn.execute(
-            "SELECT id, role, kind, content, created_at FROM messages WHERE conversation_id = ? ORDER BY id",
-            (c["id"],),
-        )]
+        msgs = [
+            dict(m)
+            for m in conn.execute(
+                "SELECT id, role, kind, content, created_at FROM messages WHERE conversation_id = ? ORDER BY id",
+                (c["id"],),
+            )
+        ]
         conversations.append({**dict(c), "messages": msgs})
     return {"note": note, "duplicate_target": dup_target, "conversations": conversations}
 
@@ -564,12 +599,16 @@ def _validate_put_fields(body: dict) -> dict:
     """PUT 字段白名单 + 取值校验（§5：任意字段；系统字段不可改）。"""
     unknown = set(body) - notes.UPDATABLE_FIELDS
     if unknown:
-        raise HTTPException(status_code=422, detail=f"不允许更新的字段: {', '.join(sorted(unknown))}")
+        raise HTTPException(
+            status_code=422, detail=f"不允许更新的字段: {', '.join(sorted(unknown))}"
+        )
     fields: dict = {}
     for k in ("raw", "title", "summary", "content", "source_url", "done_at"):
         if k in body:
             v = body[k]
-            fields[k] = None if v is None or (isinstance(v, str) and not v.strip()) else str(v).strip()
+            fields[k] = (
+                None if v is None or (isinstance(v, str) and not v.strip()) else str(v).strip()
+            )
     if "category" in body:
         cat = body["category"]
         if cat is not None and cat not in config.CATEGORIES:
@@ -590,14 +629,19 @@ def _validate_put_fields(body: dict) -> dict:
         if imp not in (1, 2, 3):
             raise HTTPException(status_code=422, detail="importance 须为 1/2/3")
         fields["importance"] = imp
-    if "source_url" in fields and fields["source_url"] is not None \
-            and not fields["source_url"].startswith(("http://", "https://")):
+    if (
+        "source_url" in fields
+        and fields["source_url"] is not None
+        and not fields["source_url"].startswith(("http://", "https://"))
+    ):
         raise HTTPException(status_code=422, detail="source_url 须为 http(s) URL 或空")
     return fields
 
 
 @router.put("/api/notes/{note_id}")
-def update_note_api(note_id: int, body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep) -> dict:
+def update_note_api(
+    note_id: int, body: dict, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep
+) -> dict:
     """完整编辑（§5）：更新任意字段 → 触发重整理（删向量重算 embedding + 重建 FTS + 重新查重）。"""
     note = db.fetch_note(conn, note_id)
     if not note:
@@ -640,7 +684,9 @@ def merge_note_api(note_id: int, conn: ConnDep, rq: QueueDep, _auth: ApiAuthDep)
         raise HTTPException(status_code=404, detail="笔记不存在")
     target_id = note.get("duplicate_of")
     if not target_id:
-        raise HTTPException(status_code=409, detail="缺少合并目标（查重未记录 duplicate_of，请先忽略或删除）")
+        raise HTTPException(
+            status_code=409, detail="缺少合并目标（查重未记录 duplicate_of，请先忽略或删除）"
+        )
     try:
         target = notes.merge_note(conn, note_id, target_id)
     except KeyError as e:
@@ -668,6 +714,7 @@ def ignore_note_api(note_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
 # ---------------------------------------------------------------------------
 # 统计与每周总结（设计文档 §5 / §8 统计页；M3）
 # ---------------------------------------------------------------------------
+
 
 @router.get("/api/stats")
 def stats(conn: ConnDep, _auth: ApiAuthDep) -> dict:
@@ -708,22 +755,37 @@ def weekly_summary_api(conn: ConnDep, _auth: ApiAuthDep) -> dict:
         "SELECT * FROM notes WHERE status != 'merged' "
         "AND created_at >= datetime('now', 'localtime', '-7 days') ORDER BY created_at"
     ).fetchall()
-    notes_list = [db.note_to_dict(r, [t["tag"] for t in conn.execute(
-        "SELECT tag FROM tags WHERE note_id = ? ORDER BY tag", (r["id"],))]) for r in rows]
+    notes_list = [
+        db.note_to_dict(
+            r,
+            [
+                t["tag"]
+                for t in conn.execute(
+                    "SELECT tag FROM tags WHERE note_id = ? ORDER BY tag", (r["id"],)
+                )
+            ],
+        )
+        for r in rows
+    ]
     note_count = len(notes_list)
     try:
         summary = llm.weekly_summary(notes_list)
         return {"summary": summary, "note_count": note_count, "degraded": False}
     except llm.LLMError as e:
         logger.warning("每周总结生成失败，降级纯统计: %s", e)
-        cat_lines = "、".join(f"{c['category']} {c['count']} 条" for c in stats(conn, _auth=None)["by_category"])
-        summary = f"本周共记录 {note_count} 条笔记" + (f"（{cat_lines}）" if cat_lines else "") + "。"
+        cat_lines = "、".join(
+            f"{c['category']} {c['count']} 条" for c in stats(conn, _auth=None)["by_category"]
+        )
+        summary = (
+            f"本周共记录 {note_count} 条笔记" + (f"（{cat_lines}）" if cat_lines else "") + "。"
+        )
         return {"summary": summary, "note_count": note_count, "degraded": True}
 
 
 # ---------------------------------------------------------------------------
 # 问答端点（设计文档 §7：单轮无状态；向量+FTS+RRF+材料层兜底 + LLM 作答带引用）
 # ---------------------------------------------------------------------------
+
 
 @router.post("/api/ask")
 def ask_question(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
@@ -752,6 +814,7 @@ def ask_question(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
 # 登录端点（设计文档 §9 + M3 拍板 §24：AUTH_PASSWORD 配置即全局启用）
 # ---------------------------------------------------------------------------
 
+
 @router.post("/api/login")
 def login(body: dict, conn: ConnDep, response: Response) -> dict:
     """登录：argon2 校验密码 → 建 SQLite session → Set-Cookie（HttpOnly + SameSite=Lax）。
@@ -775,9 +838,13 @@ def login(body: dict, conn: ConnDep, response: Response) -> dict:
     session = auth.create_session(conn)
     conn.commit()
     response.set_cookie(
-        config.AUTH_COOKIE_NAME, session["token"],
+        config.AUTH_COOKIE_NAME,
+        session["token"],
         max_age=config.AUTH_SESSION_DAYS * 86400,
-        httponly=True, samesite="lax", secure=config.AUTH_COOKIE_SECURE, path="/",
+        httponly=True,
+        samesite="lax",
+        secure=config.AUTH_COOKIE_SECURE,
+        path="/",
     )
     return {"ok": True}
 
@@ -797,7 +864,8 @@ def login_page(request: Request, conn: ConnDep) -> HTMLResponse:
     if config.auth_enabled() and _current_session(request, conn):
         return RedirectResponse("/", status_code=303)
     return render(
-        request, "login.html",
+        request,
+        "login.html",
         {"active": None, "next": request.query_params.get("next", "/")},
     )
 
@@ -805,6 +873,7 @@ def login_page(request: Request, conn: ConnDep) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 # Web 页面（§8：服务端渲染 + 少量原生 JS，移动端优先，中文）
 # ---------------------------------------------------------------------------
+
 
 @router.get("/", response_class=HTMLResponse)
 def index_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLResponse:
@@ -816,9 +885,14 @@ def index_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLRespo
            FROM conversations c WHERE c.status='draft' ORDER BY c.updated_at DESC"""
     ).fetchall()
     return render(
-        request, "index.html",
-        {"recent": recent, "drafts": [dict(d) for d in drafts], "categories": config.CATEGORIES,
-         "active": "index"},
+        request,
+        "index.html",
+        {
+            "recent": recent,
+            "drafts": [dict(d) for d in drafts],
+            "categories": config.CATEGORIES,
+            "active": "index",
+        },
     )
 
 
@@ -831,7 +905,8 @@ def ask_page(request: Request, _sess: PageAuthDep) -> HTMLResponse:
 def review_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLResponse:
     data = review_list(conn, _auth=None)  # 页面路由已鉴权，内部调用无需再查
     return render(
-        request, "review.html",
+        request,
+        "review.html",
         {"pending": data["pending"], "in_progress": data["in_progress"], "active": "review"},
     )
 
@@ -841,22 +916,34 @@ def chat_page(request: Request, conv_id: int, conn: ConnDep, _sess: PageAuthDep)
     conv = _fetch_conversation(conn, conv_id)
     msgs = _conv_messages(conn, conv_id)
     return render(
-        request, "chat.html",
+        request,
+        "chat.html",
         {"conv": dict(conv), "messages": [dict(m) for m in msgs], "active": "index"},
     )
 
 
 @router.get("/notes", response_class=HTMLResponse)
 def notes_page(
-    request: Request, conn: ConnDep, _sess: PageAuthDep,
-    category: str | None = None, kind: str | None = None, q: str | None = None, page: int = 1,
+    request: Request,
+    conn: ConnDep,
+    _sess: PageAuthDep,
+    category: str | None = None,
+    kind: str | None = None,
+    q: str | None = None,
+    page: int = 1,
 ) -> HTMLResponse:
     data = query_notes(conn, category=category, kind=kind, q=q, page=page)
     return render(
-        request, "notes.html",
-        {"data": data, "categories": config.CATEGORIES,
-         "cur_category": category, "cur_kind": kind, "cur_q": q or "",
-         "active": "notes"},
+        request,
+        "notes.html",
+        {
+            "data": data,
+            "categories": config.CATEGORIES,
+            "cur_category": category,
+            "cur_kind": kind,
+            "cur_q": q or "",
+            "active": "notes",
+        },
     )
 
 
@@ -868,10 +955,13 @@ def stats_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLRespo
 
 
 @router.get("/notes/{note_id}", response_class=HTMLResponse)
-def note_detail_page(request: Request, note_id: int, conn: ConnDep, _sess: PageAuthDep) -> HTMLResponse:
+def note_detail_page(
+    request: Request, note_id: int, conn: ConnDep, _sess: PageAuthDep
+) -> HTMLResponse:
     """笔记详情页（§8：展示 + 完整编辑 + 修正入口 + 来源对话 + 合并/忽略 + 重新整理 + 删除）。"""
     data = _note_detail(conn, note_id)
     return render(
-        request, "note_detail.html",
+        request,
+        "note_detail.html",
         {**data, "categories": config.CATEGORIES, "active": "notes"},
     )

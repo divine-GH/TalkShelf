@@ -1,0 +1,13 @@
+# 统一行尾（Windows 开发防 CRLF/LF 混用污染 diff）：
+# 入库统一 LF；text=auto 已能按平台检出，此处显式声明源码类文件强制 LF
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf

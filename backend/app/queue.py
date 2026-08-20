@@ -11,6 +11,7 @@
      启动扫描补向量的老笔记不查重（防误标）；命中标 duplicate；失败只记日志不反噬（§21.2 #5）。
 启动时扫描 status='pending' 与「已 processed 但缺向量」的笔记补做；failed 不自动重试（留待手动 reprocess，§15.5 #4）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -86,7 +87,9 @@ class ReprocessQueue:
         self._retries[note_id] = attempt
         if attempt <= len(config.BACKOFF_SCHEDULE):
             delay = config.BACKOFF_SCHEDULE[attempt - 1]
-            logger.warning("笔记 #%s 补处理失败（第 %d 次，%ds 后重试）：%s", note_id, attempt, delay, exc)
+            logger.warning(
+                "笔记 #%s 补处理失败（第 %d 次，%ds 后重试）：%s", note_id, attempt, delay, exc
+            )
 
             async def _retry_later() -> None:
                 await asyncio.sleep(delay)
@@ -95,9 +98,15 @@ class ReprocessQueue:
             asyncio.create_task(_retry_later())
         elif isinstance(exc, embedding.EmbeddingError):
             # embedding 失败不标 failed：保持状态，恢复后由启动扫描/下次提交补（§14 第 8 条）
-            logger.error("笔记 #%s embedding 补算失败已达上限，保持原状态（Ollama 恢复后重启自动补）：%s", note_id, exc)
+            logger.error(
+                "笔记 #%s embedding 补算失败已达上限，保持原状态（Ollama 恢复后重启自动补）：%s",
+                note_id,
+                exc,
+            )
         else:
-            logger.error("笔记 #%s 补处理失败已达上限，标 failed（留待手动 reprocess）：%s", note_id, exc)
+            logger.error(
+                "笔记 #%s 补处理失败已达上限，标 failed（留待手动 reprocess）：%s", note_id, exc
+            )
             conn = db.connect()
             try:
                 conn.execute(

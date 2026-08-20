@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """note-brain M2 端到端真实冒烟（真实 DeepSeek + 真实 Ollama，花几分钱）。
 
 验证链路：对话式记录（真实整理 JSON）→ 拍板落库 → 队列补做（真实 embedding + 向量查重）
@@ -8,6 +7,7 @@
     & '.venv\\Scripts\\python.exe' scripts/smoke_e2e.py
 退出码：0 全部通过；非 0 冒烟失败。
 """
+
 import os
 import sys
 import time
@@ -18,9 +18,8 @@ sys.path.insert(0, str(BASE / "backend"))
 
 sys.stdout.reconfigure(encoding="utf-8")  # Windows 管道 GBK 乱码防护
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from app import config, db  # noqa: E402
+from app import config, db
+from fastapi.testclient import TestClient
 
 PASS = 0
 FAIL = 0
@@ -52,12 +51,20 @@ def main() -> int:
 
     with TestClient(app) as client:
         # 1. 对话式记录（真实整理：LLM 理解 → 整理 JSON）
-        resp = client.post("/api/conversations", json={
-            "message": "nginx client_max_body_size 默认 1M，上传大文件直接 413，要把 http 块里调大到 100m"})
+        resp = client.post(
+            "/api/conversations",
+            json={
+                "message": "nginx client_max_body_size 默认 1M，上传大文件直接 413，要把 http 块里调大到 100m"
+            },
+        )
         check("发起对话（真实整理）", resp.status_code == 200, resp.text[:200])
         data = resp.json()
         conv_id = data.get("conversation_id")
-        check("对话回复为整理 JSON", data.get("organized") is True, f"reply={data.get('reply', '')[:80]!r}")
+        check(
+            "对话回复为整理 JSON",
+            data.get("organized") is True,
+            f"reply={data.get('reply', '')[:80]!r}",
+        )
 
         # 2. 拍板落库（收藏）
         resp = client.post(f"/api/conversations/{conv_id}/confirm", json={"kind": "note"})
@@ -69,10 +76,15 @@ def main() -> int:
         while time.time() < deadline:
             conn = db.connect()
             try:
-                has_emb = conn.execute(
-                    "SELECT 1 FROM embeddings WHERE note_id = ?", (note_id,)).fetchone() is not None
+                has_emb = (
+                    conn.execute(
+                        "SELECT 1 FROM embeddings WHERE note_id = ?", (note_id,)
+                    ).fetchone()
+                    is not None
+                )
                 status = conn.execute(
-                    "SELECT status FROM notes WHERE id = ?", (note_id,)).fetchone()[0]
+                    "SELECT status FROM notes WHERE id = ?", (note_id,)
+                ).fetchone()[0]
             finally:
                 conn.close()
             if has_emb and status in ("processed", "duplicate"):
@@ -87,7 +99,7 @@ def main() -> int:
         ask = resp.json()
         check("向量检索可用", ask.get("vector_ok") is True)
         check("召回来源非空", bool(ask.get("sources")), f"sources={ask['sources']}")
-        check("答案含引用/内容", len((ask.get("answer") or "")) > 20, ask.get("answer", "")[:80])
+        check("答案含引用/内容", len(ask.get("answer") or "") > 20, ask.get("answer", "")[:80])
 
         # 5. 回顾页：把这条 note 转成 interest 再走一遍分区（快速验证）
         # （兴趣条目另造一条，验证 review API）
@@ -117,7 +129,8 @@ def main() -> int:
             conn = db.connect()
             try:
                 vec = conn.execute(
-                    "SELECT vector FROM embeddings WHERE note_id = ?", (note_id,)).fetchone()
+                    "SELECT vector FROM embeddings WHERE note_id = ?", (note_id,)
+                ).fetchone()
             finally:
                 conn.close()
             if vec is not None:
@@ -144,11 +157,17 @@ def main() -> int:
         # 9. M3 统计 + 每周总结（真实 LLM）
         resp = client.get("/api/stats")
         st = resp.json()
-        check("stats 200 且含分布", resp.status_code == 200 and "by_category" in st and "by_month" in st)
+        check(
+            "stats 200 且含分布",
+            resp.status_code == 200 and "by_category" in st and "by_month" in st,
+        )
         resp = client.post("/api/weekly")
         wk = resp.json()
-        check("每周总结生成（真实 LLM）", resp.status_code == 200 and wk.get("degraded") is False,
-              f"degraded={wk.get('degraded')} summary={wk.get('summary', '')[:60]!r}")
+        check(
+            "每周总结生成（真实 LLM）",
+            resp.status_code == 200 and wk.get("degraded") is False,
+            f"degraded={wk.get('degraded')} summary={wk.get('summary', '')[:60]!r}",
+        )
 
         # 10. M3 登录：.env 未配 AUTH_PASSWORD 则跳过（配了则走真实登录）
         if config.auth_enabled():

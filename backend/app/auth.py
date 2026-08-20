@@ -8,6 +8,7 @@
 - CSRF：登录时生成 csrf_token 存 session 表，页面注入 meta，非安全方法请求须带
   X-CSRF-Token 头（校验在 api.require_auth，见 api.py）。
 """
+
 from __future__ import annotations
 
 import secrets
@@ -46,12 +47,15 @@ def verify_password(password: str) -> bool:
 # session（SQLite 表）
 # ---------------------------------------------------------------------------
 
+
 def create_session(conn: sqlite3.Connection) -> dict:
     """新建会话：清过期行 + 插入（token, csrf_token, expires_at），返回两者。"""
     conn.execute("DELETE FROM sessions WHERE expires_at < datetime('now','localtime')")
     token = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(32)
-    expires = (datetime.now() + timedelta(days=config.AUTH_SESSION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    expires = (datetime.now() + timedelta(days=config.AUTH_SESSION_DAYS)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
     conn.execute(
         "INSERT INTO sessions(token, csrf_token, expires_at) VALUES (?, ?, ?)",
         (token, csrf, expires),
@@ -79,6 +83,7 @@ def delete_session(conn: sqlite3.Connection, token: str | None) -> None:
 # 登录失败限速（§9：5 次/分钟锁 15 分钟；记录落 SQLite，重启不失效）
 # ---------------------------------------------------------------------------
 
+
 def _failure_count(conn: sqlite3.Connection, since: str) -> int:
     return conn.execute(
         "SELECT COUNT(*) FROM login_failures WHERE attempted_at >= ?", (since,)
@@ -91,9 +96,7 @@ def is_login_blocked(conn: sqlite3.Connection) -> bool:
     window_start = (now - timedelta(seconds=config.LOGIN_FAIL_WINDOW)).strftime("%Y-%m-%d %H:%M:%S")
     if _failure_count(conn, window_start) < config.LOGIN_FAIL_LIMIT:
         return False
-    last = conn.execute(
-        "SELECT MAX(attempted_at) FROM login_failures"
-    ).fetchone()[0]
+    last = conn.execute("SELECT MAX(attempted_at) FROM login_failures").fetchone()[0]
     if not last:
         return False
     try:
@@ -110,7 +113,7 @@ def lock_remaining_seconds(conn: sqlite3.Connection) -> int:
     last = conn.execute("SELECT MAX(attempted_at) FROM login_failures").fetchone()[0]
     try:
         last_dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return 0
     return max(0, config.LOGIN_LOCK_SECONDS - int((datetime.now() - last_dt).total_seconds()))
 
@@ -118,9 +121,9 @@ def lock_remaining_seconds(conn: sqlite3.Connection) -> int:
 def record_failure(conn: sqlite3.Connection) -> None:
     """记一次失败，并清理过期记录（仅保留窗口+锁定时长内的，防表膨胀）。"""
     conn.execute("INSERT INTO login_failures(attempted_at) VALUES (datetime('now','localtime'))")
-    cutoff = (datetime.now() - timedelta(
-        seconds=config.LOGIN_FAIL_WINDOW + config.LOGIN_LOCK_SECONDS
-    )).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = (
+        datetime.now() - timedelta(seconds=config.LOGIN_FAIL_WINDOW + config.LOGIN_LOCK_SECONDS)
+    ).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute("DELETE FROM login_failures WHERE attempted_at < ?", (cutoff,))
 
 

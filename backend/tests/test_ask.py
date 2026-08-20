@@ -2,6 +2,7 @@
 
 LLM 与 embedding 全 mock（conftest：固定答案文本 + 确定性伪向量），不触网。
 """
+
 from conftest import note_status, wait_for
 
 
@@ -9,13 +10,18 @@ def _mk_note(client, db_path, raw: str) -> int:
     resp = client.post("/api/notes", json={"raw": raw, "kind": "note"})
     assert resp.status_code == 202, resp.text
     note_id = resp.json()["note_id"]
-    wait_for(lambda: note_status(db_path, note_id)[0] in ("processed", "duplicate"),
-             desc=f"笔记 {note_id} 整理完成")
+    wait_for(
+        lambda: note_status(db_path, note_id)[0] in ("processed", "duplicate"),
+        desc=f"笔记 {note_id} 整理完成",
+    )
     return note_id
 
 
-def _mk_client_with_answer(client, monkeypatch, answer: str = "答案：上传大文件被拒是因为默认 1M 限制 [1]"):
+def _mk_client_with_answer(
+    client, monkeypatch, answer: str = "答案：上传大文件被拒是因为默认 1M 限制 [1]"
+):
     from app import llm
+
     monkeypatch.setattr(llm, "_call_chat", lambda *a, **k: answer)
 
 
@@ -36,8 +42,8 @@ def test_ask_basic_flow(client, llm_ok, db_path, monkeypatch):
 
 def test_ask_rrf_merges_and_dedups(client, llm_ok, db_path, monkeypatch):
     """RRF 融合：向量 + FTS 双路命中去重合并，sources 无重复 id（§7 混合排序）。"""
-    n1 = _mk_note(client, db_path, "nginx client_max_body_size 默认 1M 上传大文件被拒 413 需要调大")
-    n2 = _mk_note(client, db_path, "nginx 上传大小限制与 413 报错排查记录")
+    _mk_note(client, db_path, "nginx client_max_body_size 默认 1M 上传大文件被拒 413 需要调大")
+    _mk_note(client, db_path, "nginx 上传大小限制与 413 报错排查记录")
     _mk_client_with_answer(client, monkeypatch)
 
     resp = client.post("/api/ask", json={"question": "nginx 上传大文件 413"})
@@ -53,9 +59,14 @@ def test_ask_material_fallback(client, llm_ok, db_path, monkeypatch, conn):
     # 手工插入一条材料（模拟对话落库的抓取正文）
     cur = conn.execute(
         "INSERT INTO note_materials(note_id, kind, url, text) VALUES (?, 'fetched_page', ?, ?)",
-        (note_id, "https://example.com/bge-m3", "bge-m3 是智源发布的多语言 embedding 模型，支持 1024 维向量"),
+        (
+            note_id,
+            "https://example.com/bge-m3",
+            "bge-m3 是智源发布的多语言 embedding 模型，支持 1024 维向量",
+        ),
     )
     from app import db as db_mod
+
     db_mod.material_fts_sync(conn, cur.lastrowid)
     conn.commit()
     _mk_client_with_answer(client, monkeypatch)
@@ -77,8 +88,11 @@ def test_ask_fts_only_when_ollama_down(client, llm_ok, db_path, monkeypatch):
 
     _mk_note(client, db_path, "nginx client_max_body_size 默认 1M 上传大文件被拒 413")
     _mk_client_with_answer(client, monkeypatch)
-    monkeypatch.setattr(embedding, "embed_texts",
-                        lambda *a, **k: (_ for _ in ()).throw(embedding.EmbeddingError("mock 挂了")))
+    monkeypatch.setattr(
+        embedding,
+        "embed_texts",
+        lambda *a, **k: (_ for _ in ()).throw(embedding.EmbeddingError("mock 挂了")),
+    )
 
     resp = client.post("/api/ask", json={"question": "nginx 上传限制"})
     assert resp.status_code == 200, resp.text

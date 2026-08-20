@@ -6,8 +6,8 @@
 - CSRF：登录后非安全方法须带 X-CSRF-Token，缺失/不符 → 403；
 - 登出：删 session + 清 cookie。
 """
-import pytest
 
+import pytest
 from app import auth, config
 
 
@@ -27,6 +27,7 @@ def _login(client, password: str, **kw):
 # 关闭态（默认）
 # ---------------------------------------------------------------------------
 
+
 def test_login_disabled_by_default(client, llm_ok):
     """未配置 AUTH_PASSWORD：登录端点 403，页面与 API 免鉴权可访问。"""
     assert client.post("/api/login", json={"password": "x"}).status_code == 403
@@ -37,6 +38,7 @@ def test_login_disabled_by_default(client, llm_ok):
 # ---------------------------------------------------------------------------
 # 启用态：鉴权与登录流程
 # ---------------------------------------------------------------------------
+
 
 def test_pages_redirect_and_api_401_when_logged_out(client, auth_on):
     resp = client.get("/notes", follow_redirects=False)
@@ -80,6 +82,7 @@ def test_logout_invalidates_session(client, auth_on):
 # 失败限速（§9：5 次/分钟锁 15 分钟）
 # ---------------------------------------------------------------------------
 
+
 def test_login_rate_limit_blocks(client, auth_on, db_path, monkeypatch):
     monkeypatch.setattr(config, "LOGIN_FAIL_LIMIT", 3)
     monkeypatch.setattr(config, "LOGIN_FAIL_WINDOW", 3600)
@@ -91,6 +94,7 @@ def test_login_rate_limit_blocks(client, auth_on, db_path, monkeypatch):
     assert "已锁定" in resp.json()["detail"]
     # 失败记录确实落 SQLite（重启不失效的载体是表，不是进程内存）
     import sqlite3
+
     conn = sqlite3.connect(db_path)
     try:
         n = conn.execute("SELECT COUNT(*) FROM login_failures").fetchone()[0]
@@ -118,9 +122,11 @@ def test_login_success_clears_failures(client, auth_on, monkeypatch):
 # CSRF（§9：非安全方法须带 X-CSRF-Token）
 # ---------------------------------------------------------------------------
 
+
 def _csrf_from_page(client) -> str:
     html = client.get("/").text
     import re
+
     m = re.search(r'name="csrf-token" content="([^"]+)"', html)
     assert m, "页面必须注入 csrf-token meta"
     return m.group(1)
@@ -133,10 +139,14 @@ def test_csrf_required_for_mutations(client, auth_on, llm_ok):
     resp = client.post("/api/notes", json={"raw": "x", "kind": "note"})
     assert resp.status_code == 403
     # 错误头 → 403
-    resp = client.post("/api/notes", json={"raw": "x", "kind": "note"}, headers={"X-CSRF-Token": "bad"})
+    resp = client.post(
+        "/api/notes", json={"raw": "x", "kind": "note"}, headers={"X-CSRF-Token": "bad"}
+    )
     assert resp.status_code == 403
     # 正确头 → 放行（202）
-    resp = client.post("/api/notes", json={"raw": "x", "kind": "note"}, headers={"X-CSRF-Token": csrf})
+    resp = client.post(
+        "/api/notes", json={"raw": "x", "kind": "note"}, headers={"X-CSRF-Token": csrf}
+    )
     assert resp.status_code == 202
     # GET 免 CSRF
     assert client.get("/api/notes").status_code == 200

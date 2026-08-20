@@ -6,10 +6,9 @@
 - 工具循环上限：达 WEB_FETCH_TOOL_MAX_ROUNDS 后终止。
 LLM / 搜索 / 抓取全 mock，不触网。
 """
+
 import json
 import sqlite3
-
-from conftest import note_status, wait_for
 
 from app import fetch, llm, web_search
 from app.fetch import FetchResult
@@ -36,8 +35,9 @@ def test_should_search_trigger_words(monkeypatch):
 def test_search_injected_and_materialized(client, llm_ok, db_path, monkeypatch):
     """意图词触发搜索 → search_result 消息入库（markdown 格式）→ 拍板后材料落库带 URL。"""
     monkeypatch.setattr(web_search, "search", lambda q: SEARCH_ITEMS)
-    conv_id = client.post("/api/conversations",
-                          json={"message": "查一下 frp 最新版本"}).json()["conversation_id"]
+    conv_id = client.post("/api/conversations", json={"message": "查一下 frp 最新版本"}).json()[
+        "conversation_id"
+    ]
 
     resp = client.get(f"/api/conversations/{conv_id}").json()
     sr = [m for m in resp["messages"] if m["kind"] == "search_result"]
@@ -62,19 +62,23 @@ def test_search_injected_and_materialized(client, llm_ok, db_path, monkeypatch):
 
 def test_no_trigger_no_search(client, llm_ok, monkeypatch):
     """无意图词不触发搜索（§6.5：用户明确要求才搜）。"""
+
     def boom(*a, **k):
         raise AssertionError("不应触发搜索")
+
     monkeypatch.setattr(web_search, "search", boom)
-    conv_id = client.post("/api/conversations",
-                          json={"message": "记一下 frp 配置"}).json()["conversation_id"]
+    conv_id = client.post("/api/conversations", json={"message": "记一下 frp 配置"}).json()[
+        "conversation_id"
+    ]
     resp = client.get(f"/api/conversations/{conv_id}").json()
     assert not any(m["kind"] == "search_result" for m in resp["messages"])
 
 
 def test_search_failure_degraded(client, llm_ok, monkeypatch):
     """搜索失败（§6.5 降级）：对话照常进行，不阻塞、无 search_result 消息。"""
-    monkeypatch.setattr(web_search, "search",
-                        lambda q: (_ for _ in ()).throw(web_search.SearchError("mock 挂了")))
+    monkeypatch.setattr(
+        web_search, "search", lambda q: (_ for _ in ()).throw(web_search.SearchError("mock 挂了"))
+    )
     resp = client.post("/api/conversations", json={"message": "查一下 DeepSeek 新闻"})
     assert resp.status_code == 200
     data = resp.json()
@@ -91,17 +95,25 @@ def test_web_fetch_tool_loop(client, llm_ok, db_path, monkeypatch):
     def fake_tools(messages, tools, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
-            return "", [{"id": "call-1", "type": "function",
-                         "function": {"name": "web_fetch",
-                                      "arguments": json.dumps({"url": "https://example.com/a"})}}]
+            return "", [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "web_fetch",
+                        "arguments": json.dumps({"url": "https://example.com/a"}),
+                    },
+                }
+            ]
         return json.dumps(dict(llm_ok), ensure_ascii=False), []
 
     monkeypatch.setattr(llm, "_chat_with_tools", fake_tools)
     monkeypatch.setattr(fetch, "fetch_page", _fake_fetch)
     monkeypatch.setattr(web_search, "search", lambda q: SEARCH_ITEMS)
 
-    conv_id = client.post("/api/conversations",
-                          json={"message": "查一下 frp 文档"}).json()["conversation_id"]
+    conv_id = client.post("/api/conversations", json={"message": "查一下 frp 文档"}).json()[
+        "conversation_id"
+    ]
     assert calls["n"] == 2, "第一轮工具调用 + 第二轮最终回复"
 
     resp = client.get(f"/api/conversations/{conv_id}").json()
@@ -114,8 +126,12 @@ def test_web_fetch_tool_loop(client, llm_ok, db_path, monkeypatch):
     note_id = resp.json()["note"]["id"]
     conn = sqlite3.connect(db_path)
     try:
-        kinds = [r[0] for r in conn.execute(
-            "SELECT kind FROM note_materials WHERE note_id = ?", (note_id,)).fetchall()]
+        kinds = [
+            r[0]
+            for r in conn.execute(
+                "SELECT kind FROM note_materials WHERE note_id = ?", (note_id,)
+            ).fetchall()
+        ]
     finally:
         conn.close()
     assert "fetched_page" in kinds and "search_result" in kinds
@@ -133,9 +149,16 @@ def test_web_fetch_tool_loop_cap(client, llm_ok, monkeypatch):
 
     def always_tools(messages, tools, **kwargs):
         calls["n"] += 1
-        return "", [{"id": f"c-{calls['n']}", "type": "function",
-                     "function": {"name": "web_fetch",
-                                  "arguments": json.dumps({"url": "https://example.com/x"})}}]
+        return "", [
+            {
+                "id": f"c-{calls['n']}",
+                "type": "function",
+                "function": {
+                    "name": "web_fetch",
+                    "arguments": json.dumps({"url": "https://example.com/x"}),
+                },
+            }
+        ]
 
     monkeypatch.setattr(llm, "_chat_with_tools", always_tools)
     fetches = {"n": 0}
@@ -161,17 +184,28 @@ def test_web_fetch_failure_passthrough(client, llm_ok, monkeypatch):
     def fake_tools(messages, tools, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
-            return "", [{"id": "call-1", "type": "function",
-                         "function": {"name": "web_fetch",
-                                      "arguments": json.dumps({"url": "http://10.0.0.5/"})}}]
+            return "", [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "web_fetch",
+                        "arguments": json.dumps({"url": "http://10.0.0.5/"}),
+                    },
+                }
+            ]
         return json.dumps(dict(llm_ok), ensure_ascii=False), []
 
     monkeypatch.setattr(llm, "_chat_with_tools", fake_tools)
-    monkeypatch.setattr(fetch, "fetch_page",
-                        lambda url: (_ for _ in ()).throw(fetch.FetchError("SSRF 拒绝内网地址")))
+    monkeypatch.setattr(
+        fetch,
+        "fetch_page",
+        lambda url: (_ for _ in ()).throw(fetch.FetchError("SSRF 拒绝内网地址")),
+    )
     monkeypatch.setattr(web_search, "search", lambda q: SEARCH_ITEMS)
 
-    conv_id = client.post("/api/conversations",
-                          json={"message": "查一下 frp"}).json()["conversation_id"]
+    conv_id = client.post("/api/conversations", json={"message": "查一下 frp"}).json()[
+        "conversation_id"
+    ]
     resp = client.get(f"/api/conversations/{conv_id}").json()
     assert not any(m["kind"] == "fetched_page" for m in resp["messages"]), "失败抓取不落库"

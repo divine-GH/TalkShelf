@@ -5,6 +5,7 @@
 - 全量加载到内存算余弦（个人万级毫秒级，§4「向量检索实现」）；
 - 检索侧降级策略（§7 / §14 第 8 条）：Ollama 不可用 → 调用方跳过向量路走 FTS，不报错。
 """
+
 from __future__ import annotations
 
 import logging
@@ -71,10 +72,7 @@ def save_embedding(conn: sqlite3.Connection, note_id: int, vec: np.ndarray) -> N
 def load_all_embeddings(conn: sqlite3.Connection) -> dict[int, np.ndarray]:
     """全量加载 {note_id: float32 向量}（零拷贝 np.frombuffer）。"""
     rows = conn.execute("SELECT note_id, vector FROM embeddings").fetchall()
-    return {
-        r["note_id"]: np.frombuffer(r["vector"], dtype="<f4")
-        for r in rows
-    }
+    return {r["note_id"]: np.frombuffer(r["vector"], dtype="<f4") for r in rows}
 
 
 def cosine_top_k(
@@ -111,9 +109,7 @@ def vector_candidates(
     vectors = load_all_embeddings(conn)
     if not vectors:
         raise EmbeddingError("库内无任何 embedding")
-    own = conn.execute(
-        "SELECT vector FROM embeddings WHERE note_id = ?", (note["id"],)
-    ).fetchone()
+    own = conn.execute("SELECT vector FROM embeddings WHERE note_id = ?", (note["id"],)).fetchone()
     query_vec = np.frombuffer(own["vector"], dtype="<f4") if own else embed_note(note)
     hits = cosine_top_k(query_vec, vectors, top_k, exclude_ids={note["id"]})
     out: list[dict] = []

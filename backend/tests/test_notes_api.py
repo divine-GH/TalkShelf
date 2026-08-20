@@ -1,11 +1,18 @@
 """笔记列表检索测试（设计文档 §7：FTS trigram + 双字词 LIKE 兜底 + 等值过滤）。"""
+
 import json
 
 from conftest import ORGANIZED, start_conversation
 
 
-def make_note(client, monkeypatch, raw: str, kind: str = "note",
-              category: str | None = None, title: str | None = None):
+def make_note(
+    client,
+    monkeypatch,
+    raw: str,
+    kind: str = "note",
+    category: str | None = None,
+    title: str | None = None,
+):
     """走对话 + 拍板（LLM mock 输出可覆盖的整理 JSON），落一条 processed 笔记。"""
     from app import llm
 
@@ -23,9 +30,17 @@ def make_note(client, monkeypatch, raw: str, kind: str = "note",
 
 
 def test_list_filters_category_kind(client, llm_ok, monkeypatch):
-    make_note(client, monkeypatch, "技术类笔记：nginx 配置", category="技术", title="nginx 配置技巧")
-    make_note(client, monkeypatch, "生活类笔记：周末买菜清单", category="生活", title="周末买菜清单",
-              kind="interest")
+    make_note(
+        client, monkeypatch, "技术类笔记：nginx 配置", category="技术", title="nginx 配置技巧"
+    )
+    make_note(
+        client,
+        monkeypatch,
+        "生活类笔记：周末买菜清单",
+        category="生活",
+        title="周末买菜清单",
+        kind="interest",
+    )
 
     tech = client.get("/api/notes", params={"category": "技术"}).json()
     assert tech["total"] == 1 and tech["items"][0]["category"] == "技术"
@@ -36,8 +51,12 @@ def test_list_filters_category_kind(client, llm_ok, monkeypatch):
 
 
 def test_list_q_trigram_and_two_char_fallback(client, llm_ok, monkeypatch):
-    make_note(client, monkeypatch, "今天发现 nginx client_max_body_size 默认 1M 的坑",
-              title="nginx 上传限制排查")
+    make_note(
+        client,
+        monkeypatch,
+        "今天发现 nginx client_max_body_size 默认 1M 的坑",
+        title="nginx 上传限制排查",
+    )
     make_note(client, monkeypatch, "完全无关的买菜清单", title="周末买菜")
 
     # 3+ 字词：trigram 命中（title 含连续串「上传限制」）

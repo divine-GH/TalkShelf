@@ -5,12 +5,10 @@ PUT 校验（未知字段/category 非法/merged 拒绝）、合并（raw 并入
 同事务出索引 + 目标重整理）、忽略（duplicate → processed）、重新整理（清元数据重跑管线）、
 详情页 HTML、修正对话 confirm 后目标向量重算。
 """
+
 import sqlite3
-import time
 
-import pytest
-
-from app import db, llm
+from app import llm
 from conftest import note_status, wait_for
 
 
@@ -32,7 +30,9 @@ def _embedding_bytes(db_path, note_id):
 def _status_and_dup(db_path, note_id):
     conn = sqlite3.connect(db_path)
     try:
-        row = conn.execute("SELECT status, duplicate_of FROM notes WHERE id = ?", (note_id,)).fetchone()
+        row = conn.execute(
+            "SELECT status, duplicate_of FROM notes WHERE id = ?", (note_id,)
+        ).fetchone()
         return (row[0], row[1]) if row else None
     finally:
         conn.close()
@@ -41,6 +41,7 @@ def _status_and_dup(db_path, note_id):
 # ---------------------------------------------------------------------------
 # 详情数据
 # ---------------------------------------------------------------------------
+
 
 def test_get_detail_with_conversations_and_duplicate_target(client, llm_ok, db_path):
     """详情：来源对话（对话式记录归档）+ duplicate_target（手工标 duplicate）。"""
@@ -61,8 +62,9 @@ def test_get_detail_with_conversations_and_duplicate_target(client, llm_ok, db_p
     # 手工标 duplicate（模拟队列查重命中）→ duplicate_target 出现
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute("UPDATE notes SET status='duplicate', duplicate_of=? WHERE id=?",
-                     (note_id, note_id))
+        conn.execute(
+            "UPDATE notes SET status='duplicate', duplicate_of=? WHERE id=?", (note_id, note_id)
+        )
         conn.commit()
     finally:
         conn.close()
@@ -78,23 +80,27 @@ def test_get_detail_404(client):
 # PUT 完整编辑（§5：触发重整理）
 # ---------------------------------------------------------------------------
 
+
 def test_put_updates_fields_and_rebuilds_embedding(client, llm_ok, db_path):
     nid = _mk_note(client, "原始内容：nginx 上传限制")
     wait_for(lambda: _embedding_bytes(db_path, nid) is not None, desc="首次向量")
     old_vec = _embedding_bytes(db_path, nid)
     assert old_vec is not None
 
-    resp = client.put(f"/api/notes/{nid}", json={
-        "raw": "改过的原文：python 协程 asyncio 用法",
-        "title": "新标题",
-        "category": "技术",
-        "tags": ["python", "asyncio"],
-        "summary": "新摘要",
-        "content": "新正文内容",
-        "importance": 3,
-        "kind": "note",
-        "source_url": "https://example.com/asyncio",
-    })
+    resp = client.put(
+        f"/api/notes/{nid}",
+        json={
+            "raw": "改过的原文：python 协程 asyncio 用法",
+            "title": "新标题",
+            "category": "技术",
+            "tags": ["python", "asyncio"],
+            "summary": "新摘要",
+            "content": "新正文内容",
+            "importance": 3,
+            "kind": "note",
+            "source_url": "https://example.com/asyncio",
+        },
+    )
     assert resp.status_code == 200, resp.text
     updated = resp.json()
     assert updated["title"] == "新标题"
@@ -105,8 +111,12 @@ def test_put_updates_fields_and_rebuilds_embedding(client, llm_ok, db_path):
     assert client.get("/api/notes", params={"q": "asyncio"}).json()["total"] >= 1
 
     # 重整理管线：向量已删并重算（内容变了 → 向量不同）
-    wait_for(lambda: _embedding_bytes(db_path, nid) is not None and
-             _embedding_bytes(db_path, nid) != old_vec, desc="向量重算")
+    wait_for(
+        lambda: (
+            _embedding_bytes(db_path, nid) is not None and _embedding_bytes(db_path, nid) != old_vec
+        ),
+        desc="向量重算",
+    )
     assert _embedding_bytes(db_path, nid) != old_vec
 
 
@@ -137,15 +147,20 @@ def test_put_merged_note_rejected(client, llm_ok, db_path):
 # 合并 / 忽略（§6.2）
 # ---------------------------------------------------------------------------
 
+
 def test_merge_flow(client, llm_ok, db_path, monkeypatch):
     """合并：raw 并入目标 → 目标重整理；本条 merged + 同事务出索引（notes_fts/embeddings）。"""
     old = _mk_note(client, "旧笔记：nginx 上传大文件限制")
-    wait_for(lambda: note_status(db_path, old)[0] in ("processed", "duplicate"), desc="旧笔记处理完")
+    wait_for(
+        lambda: note_status(db_path, old)[0] in ("processed", "duplicate"), desc="旧笔记处理完"
+    )
     old_vec = _embedding_bytes(db_path, old)
 
     new = _mk_note(client, "新笔记：nginx client_max_body_size 调大")
     monkeypatch.setattr(llm, "judge_duplicate", lambda summary, cands: old)  # 查重命中旧笔记
-    wait_for(lambda: _status_and_dup(db_path, new) == ("duplicate", old), desc="查重命中落 duplicate_of")
+    wait_for(
+        lambda: _status_and_dup(db_path, new) == ("duplicate", old), desc="查重命中落 duplicate_of"
+    )
 
     # 详情页有重复目标
     data = client.get(f"/api/notes/{new}").json()
@@ -161,15 +176,24 @@ def test_merge_flow(client, llm_ok, db_path, monkeypatch):
     assert _status_and_dup(db_path, new) == ("merged", old)
     conn = sqlite3.connect(db_path)
     try:
-        assert conn.execute("SELECT COUNT(*) FROM notes_fts WHERE rowid=?", (new,)).fetchone()[0] == 0
-        assert conn.execute("SELECT COUNT(*) FROM embeddings WHERE note_id=?", (new,)).fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT COUNT(*) FROM notes_fts WHERE rowid=?", (new,)).fetchone()[0] == 0
+        )
+        assert (
+            conn.execute("SELECT COUNT(*) FROM embeddings WHERE note_id=?", (new,)).fetchone()[0]
+            == 0
+        )
         assert conn.execute("SELECT merged_into FROM notes WHERE id=?", (new,)).fetchone()[0] == old
     finally:
         conn.close()
 
     # 目标重整理：向量重算（raw 变了 → 向量不同）
-    wait_for(lambda: _embedding_bytes(db_path, old) is not None and
-             _embedding_bytes(db_path, old) != old_vec, desc="目标向量重算")
+    wait_for(
+        lambda: (
+            _embedding_bytes(db_path, old) is not None and _embedding_bytes(db_path, old) != old_vec
+        ),
+        desc="目标向量重算",
+    )
     assert _embedding_bytes(db_path, old) != old_vec
     # merged 笔记不再出现在列表
     assert client.get("/api/notes").json()["total"] == 1
@@ -208,6 +232,7 @@ def test_ignore_flow(client, llm_ok, db_path, monkeypatch):
 # 重新整理（§5 reprocess）
 # ---------------------------------------------------------------------------
 
+
 def test_reprocess_clears_and_reorganizes(client, llm_ok, db_path):
     nid = _mk_note(client, "直存内容等待整理")
     wait_for(lambda: note_status(db_path, nid)[0] in ("processed", "duplicate"), desc="首次整理完")
@@ -218,8 +243,13 @@ def test_reprocess_clears_and_reorganizes(client, llm_ok, db_path):
     assert resp.json()["status"] == "pending" and resp.json()["title"] is None
 
     # 队列重新整理（LLM mock 固定 JSON）→ processed + 元数据恢复
-    wait_for(lambda: note_status(db_path, nid)[0] in ("processed", "duplicate") and
-             note_status(db_path, nid)[1], desc="重新整理完")
+    wait_for(
+        lambda: (
+            note_status(db_path, nid)[0] in ("processed", "duplicate")
+            and note_status(db_path, nid)[1]
+        ),
+        desc="重新整理完",
+    )
     assert _embedding_bytes(db_path, nid) is not None
 
 
@@ -227,29 +257,38 @@ def test_reprocess_clears_and_reorganizes(client, llm_ok, db_path):
 # 修正对话（§4.3：confirm 拍板更新目标 + 重整理）
 # ---------------------------------------------------------------------------
 
+
 def test_correction_confirm_rebuilds_embedding(client, llm_ok, db_path):
     nid = _mk_note(client, "待修正笔记")
     wait_for(lambda: _embedding_bytes(db_path, nid) is not None, desc="首次向量")
     old_vec = _embedding_bytes(db_path, nid)
 
-    resp = client.post("/api/conversations", json={
-        "message": "补充：把标题改成修正后的标题",
-        "context_note_id": nid,
-    })
+    resp = client.post(
+        "/api/conversations",
+        json={
+            "message": "补充：把标题改成修正后的标题",
+            "context_note_id": nid,
+        },
+    )
     conv_id = resp.json()["conversation_id"]
     resp = client.post(f"/api/conversations/{conv_id}/confirm", json={"kind": "note"})
     assert resp.status_code == 200
     assert resp.json()["note"]["id"] == nid, "修正对话拍板应更新原笔记而非新建"
 
     # 修正后目标向量重算（raw 追加了用户新话 → 向量不同）
-    wait_for(lambda: _embedding_bytes(db_path, nid) is not None and
-             _embedding_bytes(db_path, nid) != old_vec, desc="修正后向量重算")
+    wait_for(
+        lambda: (
+            _embedding_bytes(db_path, nid) is not None and _embedding_bytes(db_path, nid) != old_vec
+        ),
+        desc="修正后向量重算",
+    )
     assert _embedding_bytes(db_path, nid) != old_vec
 
 
 # ---------------------------------------------------------------------------
 # 页面
 # ---------------------------------------------------------------------------
+
 
 def test_detail_page_html(client, llm_ok, db_path):
     nid = _mk_note(client, "页面渲染测试")

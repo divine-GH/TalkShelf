@@ -13,6 +13,7 @@
 
 注意：本脚本测的是"检索召回层"（防检索悄悄退化），不调 LLM 作答、不花钱。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,7 +28,7 @@ sys.path.insert(0, str(BASE / "backend"))
 
 sys.stdout.reconfigure(encoding="utf-8")  # Windows 管道 GBK 乱码/emoji 炸输出防护（同 smoke_e2e）
 
-from app import config, db, embedding, retrieval  # noqa: E402
+from app import config, db, embedding, retrieval
 
 EVAL_SET_PATH = BASE / "backend" / "app" / "data" / "rag_eval_set.json"
 
@@ -64,7 +65,9 @@ def seed(conn) -> dict[str, int]:
 def run_eval(conn, title_to_id: dict[str, int], threshold: float) -> int:
     eval_set = json.loads(EVAL_SET_PATH.read_text(encoding="utf-8"))
     questions = eval_set["questions"]
-    print(f"评测集：{eval_set['total']} 题（通过阈值 {eval_set['pass_threshold']}，本次 --threshold {threshold}）\n")
+    print(
+        f"评测集：{eval_set['total']} 题（通过阈值 {eval_set['pass_threshold']}，本次 --threshold {threshold}）\n"
+    )
 
     passed = 0
     for q in questions:
@@ -82,8 +85,10 @@ def run_eval(conn, title_to_id: dict[str, int], threshold: float) -> int:
         print(f"[{mark}] {q['id']} {q['question']}")
         if not hit:
             got = [s["id"] for s in r["notes"][:top_k]]
-            print(f"       期望: {expected}（{q['expected_source_type']}）"
-                  f" 实际 Top-{top_k} 笔记: {got} 材料命中: {len(r['materials'])} 条")
+            print(
+                f"       期望: {expected}（{q['expected_source_type']}）"
+                f" 实际 Top-{top_k} 笔记: {got} 材料命中: {len(r['materials'])} 条"
+            )
 
     rate = passed / len(questions)
     print(f"\n通过率：{passed}/{len(questions)} = {rate:.0%}（阈值 {threshold:.0%}）")
@@ -93,7 +98,9 @@ def run_eval(conn, title_to_id: dict[str, int], threshold: float) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description="note-brain 检索回归评测")
     ap.add_argument("--keep", action="store_true", help="保留临时库（默认评测后删除）")
-    ap.add_argument("--threshold", type=float, default=None, help="通过率阈值（默认读评测集 pass_threshold）")
+    ap.add_argument(
+        "--threshold", type=float, default=None, help="通过率阈值（默认读评测集 pass_threshold）"
+    )
     args = ap.parse_args()
 
     d = config.BASE_DIR / f".nb-eval-{time.time_ns():x}"
@@ -103,7 +110,9 @@ def main() -> int:
     try:
         db.init_db(conn)
         title_to_id = seed(conn)
-        print(f"种子：{len(title_to_id)} 条笔记 + 2 条材料，embedding 已入库（{config.EMBED_MODEL}）\n")
+        print(
+            f"种子：{len(title_to_id)} 条笔记 + 2 条材料，embedding 已入库（{config.EMBED_MODEL}）\n"
+        )
 
         eval_set = json.loads(EVAL_SET_PATH.read_text(encoding="utf-8"))
         threshold = args.threshold if args.threshold is not None else eval_set["pass_threshold"]

@@ -3,6 +3,7 @@
 所有函数不自行 commit——由调用方（API 层）开启并提交事务，保证原子性
 （笔记 + 标签 + 实体 + 材料 + FTS 行 + 对话归档 一次提交）。
 """
+
 from __future__ import annotations
 
 import re
@@ -12,6 +13,7 @@ from . import config, db, llm
 
 _FETCHED_URL_RE = re.compile(r"^Fetched (\S+)")
 _MD_LINK_RE = re.compile(r"\]\((https?://[^)\s]+)\)")
+
 
 # messages 表无 url 列（设计文档 §4）：fetched_page 的来源 URL 在 content 的 Fetched 头里；
 # search_result 的来源 URL 在 markdown 链接里（- [标题](url)，多条取第一条）
@@ -76,7 +78,9 @@ def copy_materials(conn: sqlite3.Connection, note_id: int, msgs: list[sqlite3.Ro
 
 def _user_text(msgs: list[sqlite3.Row]) -> str:
     """对话中用户的全部原话（按序拼接）——notes.raw 的语义（设计文档 §4.3）。"""
-    return "\n".join(m["content"] for m in msgs if m["role"] == "user" and m["kind"] == "text").strip()
+    return "\n".join(
+        m["content"] for m in msgs if m["role"] == "user" and m["kind"] == "text"
+    ).strip()
 
 
 def confirm_conversation(
@@ -148,9 +152,7 @@ def create_note_direct(conn: sqlite3.Connection, raw: str, kind: str) -> dict:
     202 返回 + 异步补做（LLM 整理 + 查重）；同时归档一条对话便于追溯。
     """
     raw = raw.strip()
-    cur = conn.execute(
-        "INSERT INTO notes(raw, kind, status) VALUES (?, ?, 'pending')", (raw, kind)
-    )
+    cur = conn.execute("INSERT INTO notes(raw, kind, status) VALUES (?, ?, 'pending')", (raw, kind))
     note_id = cur.lastrowid
     db.fts_sync(conn, note_id)  # 直存也可检索（§14 第 5 条）
     conv_cur = conn.execute(
@@ -183,8 +185,16 @@ def latest_organized(msgs: list[sqlite3.Row]) -> dict | None:
 
 # PUT 允许更新的字段白名单（§5：任意字段；status/created_at 等系统字段不可改）
 UPDATABLE_FIELDS = {
-    "raw", "title", "category", "summary", "content", "tags",
-    "importance", "kind", "source_url", "done_at",
+    "raw",
+    "title",
+    "category",
+    "summary",
+    "content",
+    "tags",
+    "importance",
+    "kind",
+    "source_url",
+    "done_at",
 }
 
 
@@ -242,9 +252,7 @@ def merge_note(conn: sqlite3.Connection, note_id: int, target_id: int) -> dict:
 
 def ignore_duplicate(conn: sqlite3.Connection, note_id: int) -> dict:
     """查重「忽略」（§6.2）：duplicate → processed，清 duplicate_of（用户判定不重复）。"""
-    conn.execute(
-        "UPDATE notes SET status='processed', duplicate_of=NULL WHERE id = ?", (note_id,)
-    )
+    conn.execute("UPDATE notes SET status='processed', duplicate_of=NULL WHERE id = ?", (note_id,))
     return db.fetch_note(conn, note_id)
 
 

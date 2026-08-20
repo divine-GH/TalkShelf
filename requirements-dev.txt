@@ -1,0 +1,4 @@
+# 开发/测试依赖（运行时依赖见 requirements.txt；单机项目，无需锁文件）
+-r requirements.txt
+pytest
+ruff

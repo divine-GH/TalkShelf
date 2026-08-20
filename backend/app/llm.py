@@ -5,12 +5,14 @@
 - 输出偶带 markdown 围栏，先剥离 ```json ... ``` 再解析；
 - 解析/校验失败自动重试 1 次，仍失败抛 LLMError（调用方决定降级/标 failed）。
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 
@@ -34,7 +36,7 @@ class LLMError(Exception):
 
 def _strip_code_fence(text: str) -> str:
     """剥离可能包裹 JSON 的 markdown 围栏（§6.3 已知坑）。"""
-    m = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
+    m = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     if m:
         return m.group(1).strip()
     return text.strip()
@@ -146,6 +148,7 @@ def chat_json(
 # 整理结果校验（§6.3：字段齐全、category 在体系内、kind/importance 合法）
 # ---------------------------------------------------------------------------
 
+
 def validate_organized(data: dict) -> None:
     errs: list[str] = []
     for field in ("title", "summary", "category", "tags", "kind", "importance"):
@@ -170,15 +173,20 @@ def validate_organized(data: dict) -> None:
     if "content" in data and data["content"] is not None and not isinstance(data["content"], str):
         errs.append("content 须为字符串或 null")
     src = data.get("source_url")
-    if src is not None and (not isinstance(src, str) or not src.startswith(("http://", "https://"))):
+    if src is not None and (
+        not isinstance(src, str) or not src.startswith(("http://", "https://"))
+    ):
         errs.append("source_url 须为 http(s) URL 或 null")
     ents = data.get("entities") or []
     if not isinstance(ents, list):
         errs.append("entities 须为列表")
     else:
         for e in ents:
-            if not isinstance(e, dict) or e.get("type") not in ("person", "project", "place", "date") \
-                    or not isinstance(e.get("name"), str):
+            if (
+                not isinstance(e, dict)
+                or e.get("type") not in ("person", "project", "place", "date")
+                or not isinstance(e.get("name"), str)
+            ):
                 errs.append(f"entities 项非法: {e}")
     if errs:
         raise ValueError("; ".join(errs))
@@ -187,6 +195,7 @@ def validate_organized(data: dict) -> None:
 # ---------------------------------------------------------------------------
 # 对话式记录（§6.4）：信息不足追问 / 信息足够输出整理 JSON
 # ---------------------------------------------------------------------------
+
 
 def build_system_prompt(context_note: dict | None = None) -> str:
     lines = [
@@ -261,7 +270,9 @@ def organize_conversation(
     """
     sys_prompt = build_system_prompt(context_note)
     if force_json:
-        sys_prompt += "\n（现在必须输出整理 JSON，不要追问；若信息确实缺失，基于已有信息整理并尽量合理。）"
+        sys_prompt += (
+            "\n（现在必须输出整理 JSON，不要追问；若信息确实缺失，基于已有信息整理并尽量合理。）"
+        )
     messages: list[dict] = [{"role": "system", "content": sys_prompt}]
     for m in history:
         if m.get("kind") in ("fetched_page", "search_result"):
@@ -271,7 +282,11 @@ def organize_conversation(
 
     if force_json:
         data = chat_json(messages, validate=validate_organized)
-        return {"text": json.dumps(data, ensure_ascii=False), "organized": data, "tool_materials": []}
+        return {
+            "text": json.dumps(data, ensure_ascii=False),
+            "organized": data,
+            "tool_materials": [],
+        }
 
     tool_materials: list[dict] = []
     if tools:
@@ -291,10 +306,14 @@ def organize_conversation(
                         result = fetch.fetch_page(args.get("url") or "")
                         msg = fetch.fetched_message(result)
                         tool_content = msg["content"]
-                        tool_materials.append({"kind": "fetched_page", "url": result.url, "content": msg["content"]})
+                        tool_materials.append(
+                            {"kind": "fetched_page", "url": result.url, "content": msg["content"]}
+                        )
                     except (json.JSONDecodeError, fetch.FetchError) as e:
                         tool_content = f"web_fetch 调用失败: {e}"
-                messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": tool_content})
+                messages.append(
+                    {"role": "tool", "tool_call_id": call.get("id"), "content": tool_content}
+                )
             text, calls = _chat_with_tools(messages, tools)
         # 工具循环结束后按普通回复解析（整理 JSON 或追问）
         try:
@@ -330,6 +349,7 @@ DEDUP_PROMPT = """你是 note-brain 的查重判断器。给定一条【新笔�
 
 def judge_duplicate(new_summary: str, candidates: list[dict]) -> int | None:
     """返回重复的旧笔记 id 或 None。失败抛 LLMError（调用方只记日志，不反噬入库）。"""
+
     def validate(data: dict) -> None:
         if "duplicate_of" not in data:
             raise ValueError("缺 duplicate_of")
@@ -338,8 +358,13 @@ def judge_duplicate(new_summary: str, candidates: list[dict]) -> int | None:
 
     cand_lines = []
     for c in candidates:
-        cand_lines.append(f"- 旧笔记 #{c['id']}: 标题={c.get('title')!r} 摘要={c.get('summary')!r} 原文={c.get('raw', '')[:200]!r}")
-    user = f"【新笔记】摘要={new_summary!r}\n\n【候选旧笔记】\n" + "\n".join(cand_lines) or "（无候选）"
+        cand_lines.append(
+            f"- 旧笔记 #{c['id']}: 标题={c.get('title')!r} 摘要={c.get('summary')!r} 原文={c.get('raw', '')[:200]!r}"
+        )
+    user = (
+        f"【新笔记】摘要={new_summary!r}\n\n【候选旧笔记】\n" + "\n".join(cand_lines)
+        or "（无候选）"
+    )
     data = chat_json(
         [{"role": "system", "content": DEDUP_PROMPT}, {"role": "user", "content": user}],
         validate=validate,
@@ -360,7 +385,9 @@ ASK_SYSTEM_PROMPT = """你是 note-brain 的知识库问答助手。用户的问
 4. 回答用中文，简洁准确，先给结论再给细节。"""
 
 
-def build_ask_user(question: str, notes: list[dict], materials: list[dict], weak_recall: bool) -> str:
+def build_ask_user(
+    question: str, notes: list[dict], materials: list[dict], weak_recall: bool
+) -> str:
     """组装问答用户消息（§7：问题 + 编号召回笔记 + 材料层命中 + 弱召回声明）。"""
     lines = [f"【用户问题】{question}", "", "【笔记材料】"]
     for i, n in enumerate(notes, start=1):
@@ -370,10 +397,7 @@ def build_ask_user(question: str, notes: list[dict], materials: list[dict], weak
             f"（分类：{n.get('category') or '未分类'}，{n.get('created_at') or ''}）\n{body or n.get('raw') or ''}"
         )
     for i, m in enumerate(materials, start=len(notes) + 1):
-        lines.append(
-            f"[{i}] （命中于来源材料，归属笔记#{m['note_id']}）"
-            f"{m['snippet'] or ''}"
-        )
+        lines.append(f"[{i}] （命中于来源材料，归属笔记#{m['note_id']}）{m['snippet'] or ''}")
     if not notes and not materials:
         lines.append("（无任何召回结果）")
     if weak_recall:
@@ -381,12 +405,16 @@ def build_ask_user(question: str, notes: list[dict], materials: list[dict], weak
     return "\n\n".join(lines)
 
 
-def answer_question(question: str, notes: list[dict], materials: list[dict], weak_recall: bool) -> str:
+def answer_question(
+    question: str, notes: list[dict], materials: list[dict], weak_recall: bool
+) -> str:
     """基于召回结果生成答案（deepseek-chat，temperature=0）。失败抛 LLMError。"""
-    return _call_chat([
-        {"role": "system", "content": ASK_SYSTEM_PROMPT},
-        {"role": "user", "content": build_ask_user(question, notes, materials, weak_recall)},
-    ])
+    return _call_chat(
+        [
+            {"role": "system", "content": ASK_SYSTEM_PROMPT},
+            {"role": "user", "content": build_ask_user(question, notes, materials, weak_recall)},
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +439,9 @@ def weekly_summary(notes: list[dict]) -> str:
         for i, n in enumerate(notes)
     ]
     user = f"本周共 {len(notes)} 条笔记：\n" + "\n".join(lines)
-    return _call_chat([
-        {"role": "system", "content": WEEKLY_PROMPT},
-        {"role": "user", "content": user},
-    ])
+    return _call_chat(
+        [
+            {"role": "system", "content": WEEKLY_PROMPT},
+            {"role": "user", "content": user},
+        ]
+    )

@@ -7,6 +7,7 @@
   4. 材料层兜底（Tier 2）：Top-1 向量相似度 < 0.4 或 FTS 路无命中时，
      追加 materials_fts 关键词召回 Top-5；命中不参与 RRF，附结果末尾并标注"命中于来源材料"。
 """
+
 from __future__ import annotations
 
 import logging
@@ -107,14 +108,16 @@ def _material_hits_to_sources(materials: list[dict]) -> list[dict]:
     """材料层命中转 sources 形态（标注"命中于来源材料"，归属其笔记，带 note_id）。"""
     out = []
     for m in materials:
-        out.append({
-            "note_id": m["note_id"],
-            "material_id": m["id"],
-            "kind": m["kind"],
-            "url": m["url"],
-            "snippet": (m["text"] or "")[:200],
-            "from_material": True,
-        })
+        out.append(
+            {
+                "note_id": m["note_id"],
+                "material_id": m["id"],
+                "kind": m["kind"],
+                "url": m["url"],
+                "snippet": (m["text"] or "")[:200],
+                "from_material": True,
+            }
+        )
     return out
 
 
@@ -124,13 +127,17 @@ def _note_hits_to_sources(conn: sqlite3.Connection, note_ids: list[int]) -> list
         note = db.fetch_note(conn, nid)
         if not note:
             continue
-        out.append({
-            "id": nid,
-            "title": note.get("title") or note.get("raw", "")[:40],
-            "snippet": (note.get("summary") or note.get("content") or note.get("raw") or "")[:200],
-            "url": note.get("source_url"),
-            "from_material": False,
-        })
+        out.append(
+            {
+                "id": nid,
+                "title": note.get("title") or note.get("raw", "")[:40],
+                "snippet": (note.get("summary") or note.get("content") or note.get("raw") or "")[
+                    :200
+                ],
+                "url": note.get("source_url"),
+                "from_material": False,
+            }
+        )
     return out
 
 

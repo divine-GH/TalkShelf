@@ -1,18 +1,24 @@
 """对话式记录全流程测试（设计文档 §4.3 / §6.4 / §12 M1 测试约定）。"""
+
 import json
 
-from conftest import note_status, start_conversation, wait_for
+from conftest import start_conversation
 
 
 def test_conversation_confirm_flow(client, llm_ok, db_path):
     """发起 → LLM 输出整理 JSON → 拍板落库 processed，元数据/材料/归档齐全。"""
-    conv_id = start_conversation(client, "今天发现 nginx client_max_body_size 默认 1M，上传大文件被拒，帮我记下")
+    conv_id = start_conversation(
+        client, "今天发现 nginx client_max_body_size 默认 1M，上传大文件被拒，帮我记下"
+    )
 
     # LLM 回复（mock 固定整理 JSON，围栏剥离路径：包一层 ```json 围栏验证剥离）
     resp = client.get(f"/api/conversations/{conv_id}")
     msgs = resp.json()["messages"]
     assert msgs[-1]["role"] == "assistant"
-    assert json.loads(msgs[-1]["content"].replace("```json\n", "").replace("```", ""))["title"] == "nginx 上传大文件限制"
+    assert (
+        json.loads(msgs[-1]["content"].replace("```json\n", "").replace("```", ""))["title"]
+        == "nginx 上传大文件限制"
+    )
 
     # 拍板 → 收藏
     resp = client.post(f"/api/conversations/{conv_id}/confirm", json={"kind": "note"})
@@ -61,7 +67,10 @@ def test_confirm_force_json_when_last_reply_is_question(client, llm_ok, monkeypa
 
     monkeypatch.setattr(llm, "_call_chat", fake_chat)
     conv_id = start_conversation(client, "帮我记下 nginx 的事")
-    assert "能多说一点吗" in client.get(f"/api/conversations/{conv_id}").json()["messages"][-1]["content"]
+    assert (
+        "能多说一点吗"
+        in client.get(f"/api/conversations/{conv_id}").json()["messages"][-1]["content"]
+    )
     resp = client.post(f"/api/conversations/{conv_id}/confirm", json={"kind": "note"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["note"]["status"] == "processed"
@@ -71,11 +80,16 @@ def test_confirm_force_json_when_last_reply_is_question(client, llm_ok, monkeypa
 
 def test_confirm_with_fetched_material_copied(client, llm_ok, monkeypatch, db_path):
     """对话中有抓取材料（fetched_page）→ 拍板后复制进 note_materials + materials_fts（§18.1 #2）。"""
-    from app import fetch, llm
+    from app import fetch
 
     def fake_fetch(url):
-        return fetch.FetchResult(url=url, status=200, title="测试页",
-                                 markdown="这是一段抓取到的网页正文，包含专业词汇 BGP 配置细节", truncated=False)
+        return fetch.FetchResult(
+            url=url,
+            status=200,
+            title="测试页",
+            markdown="这是一段抓取到的网页正文，包含专业词汇 BGP 配置细节",
+            truncated=False,
+        )
 
     monkeypatch.setattr(fetch, "fetch_page", fake_fetch)
     conv_id = start_conversation(client, "看这个链接 https://example.com/docs/bgp 挺有用，帮我记下")
@@ -85,6 +99,7 @@ def test_confirm_with_fetched_material_copied(client, llm_ok, monkeypatch, db_pa
     note_id = resp.json()["note"]["id"]
 
     from app import db
+
     conn = db.connect()
     try:
         rows = conn.execute("SELECT * FROM note_materials WHERE note_id = ?", (note_id,)).fetchall()
@@ -131,12 +146,17 @@ def test_confirm_twice_conflict(client, llm_ok):
 def test_correction_conversation_updates_note(client, llm_ok, db_path):
     """修正对话（context_note_id）：拍板更新目标笔记而非新建——raw 追加 + 元数据覆盖 + 归档（§4.3）。"""
     nid = start_conversation(client, "原始内容一句话")
-    note_id = client.post(f"/api/conversations/{nid}/confirm", json={"kind": "note"}).json()["note"]["id"]
+    note_id = client.post(f"/api/conversations/{nid}/confirm", json={"kind": "note"}).json()[
+        "note"
+    ]["id"]
 
-    resp = client.post("/api/conversations", json={
-        "message": "其实应该改一下分类",
-        "context_note_id": note_id,
-    })
+    resp = client.post(
+        "/api/conversations",
+        json={
+            "message": "其实应该改一下分类",
+            "context_note_id": note_id,
+        },
+    )
     assert resp.status_code == 200, resp.text
     conv2 = resp.json()["conversation_id"]
     resp = client.post(f"/api/conversations/{conv2}/confirm", json={"kind": "note"})
@@ -145,10 +165,15 @@ def test_correction_conversation_updates_note(client, llm_ok, db_path):
 
     # raw 追加保留旧原话，元数据被新整理覆盖
     from app import db
+
     conn = db.connect()
     try:
-        note = conn.execute("SELECT raw, title, category FROM notes WHERE id = ?", (note_id,)).fetchone()
-        conv2_row = conn.execute("SELECT status, note_id FROM conversations WHERE id = ?", (conv2,)).fetchone()
+        note = conn.execute(
+            "SELECT raw, title, category FROM notes WHERE id = ?", (note_id,)
+        ).fetchone()
+        conv2_row = conn.execute(
+            "SELECT status, note_id FROM conversations WHERE id = ?", (conv2,)
+        ).fetchone()
     finally:
         conn.close()
     assert "原始内容一句话" in note["raw"]

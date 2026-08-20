@@ -8,6 +8,7 @@
 - HTML→markdown 用 markdownify（bs4 预剥离 script/style/noscript，§22.4 #5 实测对齐 DSH）；
 - 正文过短（无正文可抓，如视频页）降级为标题 + 页面元数据；任何失败抛 FetchError，由调用方降级、不阻塞记录。
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -39,17 +40,21 @@ class FetchError(Exception):
 
 @dataclass
 class FetchResult:
-    url: str            # 最终 URL（跟随跳转后）
+    url: str  # 最终 URL（跟随跳转后）
     status: int
     title: str | None
-    markdown: str       # 截断后的 markdown 正文（不含 Fetched 头）
+    markdown: str  # 截断后的 markdown 正文（不含 Fetched 头）
     truncated: bool
 
 
 def _is_forbidden(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return (
-        addr.is_loopback or addr.is_link_local or addr.is_private
-        or addr.is_multicast or addr.is_reserved or addr.is_unspecified
+        addr.is_loopback
+        or addr.is_link_local
+        or addr.is_private
+        or addr.is_multicast
+        or addr.is_reserved
+        or addr.is_unspecified
     )
 
 
@@ -77,9 +82,8 @@ def _resolve_and_pin(url: str) -> tuple[str, str, str]:
         raise FetchError(f"拒绝内网/回环/链路本地地址: {ip}")
     ip_fmt = f"[{ip}]" if addr.version == 6 else ip
     host_header = host if port in (80, 443) else f"{host}:{port}"
-    ip_url = (
-        f"{parsed.scheme}://{ip_fmt}:{port}{parsed.path or '/'}"
-        + (f"?{parsed.query}" if parsed.query else "")
+    ip_url = f"{parsed.scheme}://{ip_fmt}:{port}{parsed.path or '/'}" + (
+        f"?{parsed.query}" if parsed.query else ""
     )
     return ip_url, host_header, host
 
@@ -167,7 +171,9 @@ def fetch_page(url: str) -> FetchResult:
     truncated = len(md) > config.FETCH_TEXT_LIMIT
     if truncated:
         md = md[: config.FETCH_TEXT_LIMIT]
-    return FetchResult(url=current, status=resp.status_code, title=title, markdown=md, truncated=truncated)
+    return FetchResult(
+        url=current, status=resp.status_code, title=title, markdown=md, truncated=truncated
+    )
 
 
 def fetched_message(result: FetchResult) -> dict:
@@ -176,4 +182,9 @@ def fetched_message(result: FetchResult) -> dict:
     body = result.markdown
     if result.truncated:
         body += f"\n\n（正文过长，已截断至前 {config.FETCH_TEXT_LIMIT} 字符）"
-    return {"role": "assistant", "kind": "fetched_page", "url": result.url, "content": head + "\n\n" + body}
+    return {
+        "role": "assistant",
+        "kind": "fetched_page",
+        "url": result.url,
+        "content": head + "\n\n" + body,
+    }

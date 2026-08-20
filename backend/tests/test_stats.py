@@ -4,7 +4,6 @@
 - POST /api/weekly：LLM 生成周报（mock）；LLM 不可用降级纯统计（degraded=True）；
 - /stats 页面渲染。
 """
-import sqlite3
 
 from app import llm
 from conftest import note_status, wait_for
@@ -20,9 +19,14 @@ def test_stats_structure(client, llm_ok, db_path, conn):
     a = _mk_note(client, "nginx 上传限制")
     b = _mk_note(client, "python asyncio 协程")
     c = _mk_note(client, "想试试手冲咖啡", kind="interest")
-    wait_for(lambda: note_status(db_path, a)[0] in ("processed", "duplicate") and
-             note_status(db_path, b)[0] in ("processed", "duplicate") and
-             note_status(db_path, c)[0] in ("processed", "duplicate"), desc="三条处理完")
+    wait_for(
+        lambda: (
+            note_status(db_path, a)[0] in ("processed", "duplicate")
+            and note_status(db_path, b)[0] in ("processed", "duplicate")
+            and note_status(db_path, c)[0] in ("processed", "duplicate")
+        ),
+        desc="三条处理完",
+    )
 
     data = client.get("/api/stats").json()
     assert data["total"] == 3

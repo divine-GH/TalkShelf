@@ -19,7 +19,7 @@
 - **笔记详情页**（M3）：完整编辑（保存触发重整理：重算向量/重建 FTS/重新查重）、修正对话入口、来源对话展开、合并/忽略交互（合并含 merged 出索引）、重新整理、删除
 - **登录**（M3）：`.env` 配 `AUTH_PASSWORD` 即全局启用（argon2 + SQLite session + 失败限速 + CSRF）
 - **统计页 + 每周总结**（M3）：分类/标签/时间分布；LLM 生成周报（失败降级纯统计）
-- 90 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
+- 92 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
 
 ## 登录（M3，可选）
 
@@ -59,6 +59,19 @@ cd backend
 ```
 
 LLM 与 embedding 全部 mock（`tests/conftest.py`：固定整理 JSON + 确定性伪向量），不触网、不花钱。
+
+## 代码规范（lint / format）
+
+静态检查（未使用导入/变量、未定义名字、过时写法、时区陷阱等）与排版统一用
+[ruff](https://docs.astral.sh/ruff/)（配置：`ruff.toml`，采用 ruff 0.16 默认规则集，line-length 100）：
+
+```powershell
+& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m ruff check .          # lint
+& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m ruff check . --fix    # 自动修复可安全修的问题
+& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m ruff format .         # format：统一排版
+```
+
+测试/开发工具在 `requirements-dev.txt`（pytest、ruff）：`pip install -r requirements-dev.txt`。
 
 ## 版本与更新记录
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """DeepSeek 原生联网搜索冒烟脚本（设计文档 §6.5 / §22.1，开工准备清单 §四）。
 
 验证点：
@@ -13,12 +12,12 @@
 """
 
 import argparse
+import os
 import sys
 import time
 
 import httpx
 from dotenv import load_dotenv
-import os
 
 # Windows 管道重定向下保证 UTF-8 输出（避免 GBK 乱码）
 if hasattr(sys.stdout, "reconfigure"):
@@ -32,10 +31,19 @@ MAX_USES = 3
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default="deepseek-chat", help="Anthropic 格式模型名（默认 deepseek-chat）")
-    parser.add_argument("--query", default="DeepSeek 官方 API 联网搜索 web_search_20250305 支持哪些模型", help="搜索查询词")
-    parser.add_argument("--env", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),
-                        help=".env 文件路径（默认项目根目录）")
+    parser.add_argument(
+        "--model", default="deepseek-chat", help="Anthropic 格式模型名（默认 deepseek-chat）"
+    )
+    parser.add_argument(
+        "--query",
+        default="DeepSeek 官方 API 联网搜索 web_search_20250305 支持哪些模型",
+        help="搜索查询词",
+    )
+    parser.add_argument(
+        "--env",
+        default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),
+        help=".env 文件路径（默认项目根目录）",
+    )
     args = parser.parse_args()
 
     load_dotenv(args.env)
@@ -48,10 +56,14 @@ def main() -> int:
     body = {
         "model": args.model,
         "max_tokens": MAX_TOKENS,
-        "messages": [{
-            "role": "user",
-            "content": [{"type": "text", "text": f"Perform a web search for the query: {args.query}"}],
-        }],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Perform a web search for the query: {args.query}"}
+                ],
+            }
+        ],
         "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": MAX_USES}],
     }
     headers = {
@@ -140,7 +152,9 @@ def main() -> int:
             break
 
     # 失败路径检查：模拟错误模型名（可选，默认跳过）
-    print(f"\n[OK] 冒烟通过：{args.model} 在 Anthropic 兼容端点触发原生搜索，去重后 {len(seen)} 条结果")
+    print(
+        f"\n[OK] 冒烟通过：{args.model} 在 Anthropic 兼容端点触发原生搜索，去重后 {len(seen)} 条结果"
+    )
     return 0
 
 

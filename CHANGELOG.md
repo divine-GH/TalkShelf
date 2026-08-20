@@ -16,6 +16,8 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 
 - **版本管理基础设施**：`CHANGELOG.md`（本文件）+ git tag（v0.1.0/v0.2.0/v0.3.0）+ `config.APP_VERSION` +
   `GET /api/version`（免登录，部署探活 / 确认线上版本用）。
+- **开发工具链**：引入 ruff（lint `ruff check` + format `ruff format`，配置见 `ruff.toml`，默认规则集 + line-length 100）；
+  测试/开发依赖拆分到 `requirements-dev.txt`（pytest 移出运行时依赖）。
 
 ## [0.3.0] - 2026-08-20
 

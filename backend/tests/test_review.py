@@ -4,6 +4,7 @@
 动作：去做（置 done_at）/ 留着（无操作）/ 放弃（DELETE）；稍后（清 done_at）/
 转收藏（kind→note，done_at 保留）/ 删除（DELETE，含 FTS 清理）。
 """
+
 from conftest import note_status, wait_for
 
 
@@ -57,6 +58,7 @@ def test_convert_to_note_keeps_done_at(client, llm_ok, db_path):
     assert resp.status_code == 200
     assert resp.json()["kind"] == "note"
     import sqlite3
+
     conn = sqlite3.connect(db_path)
     try:
         row = conn.execute("SELECT kind, done_at FROM notes WHERE id = ?", (nid,)).fetchone()
@@ -86,10 +88,22 @@ def test_delete_note_and_fts_cleanup(client, llm_ok, db_path, conn):
     conn2 = __import__("sqlite3").connect(db_path)
     try:
         assert conn2.execute("SELECT COUNT(*) FROM notes WHERE id = ?", (nid,)).fetchone()[0] == 0
-        assert conn2.execute("SELECT COUNT(*) FROM note_materials WHERE note_id = ?", (nid,)).fetchone()[0] == 0
-        assert conn2.execute("SELECT COUNT(*) FROM materials_fts WHERE rowid = ?", (cur.lastrowid,)).fetchone()[0] == 0, \
-            "materials_fts 孤儿行必须清理"
-        assert conn2.execute("SELECT COUNT(*) FROM notes_fts WHERE rowid = ?", (nid,)).fetchone()[0] == 0
+        assert (
+            conn2.execute(
+                "SELECT COUNT(*) FROM note_materials WHERE note_id = ?", (nid,)
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            conn2.execute(
+                "SELECT COUNT(*) FROM materials_fts WHERE rowid = ?", (cur.lastrowid,)
+            ).fetchone()[0]
+            == 0
+        ), "materials_fts 孤儿行必须清理"
+        assert (
+            conn2.execute("SELECT COUNT(*) FROM notes_fts WHERE rowid = ?", (nid,)).fetchone()[0]
+            == 0
+        )
     finally:
         conn2.close()
 

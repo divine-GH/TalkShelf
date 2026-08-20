@@ -3,6 +3,7 @@
 ⚠️ 必须单 worker 运行（--workers 1）：异步补做队列在进程内存中，
 多 worker 会各持一个队列、把同一条 pending 笔记重复处理（设计文档 §5）。
 """
+
 from __future__ import annotations
 
 import logging

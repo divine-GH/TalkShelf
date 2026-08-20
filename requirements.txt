@@ -1,4 +1,5 @@
-# note-brain 直接依赖清单（单机项目，无需锁文件；开工准备清单 §3.2）
+# note-brain 运行时依赖清单（单机项目，无需锁文件；开工准备清单 §3.2）
+# 测试/开发工具（pytest、ruff）见 requirements-dev.txt
 fastapi
 uvicorn
 httpx
@@ -6,5 +7,4 @@ numpy
 markdownify
 jinja2
 python-dotenv
-pytest
 argon2-cffi

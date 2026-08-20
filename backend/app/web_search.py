@@ -10,6 +10,7 @@
 - 无结果块按搜索失败处理（不从模型 prose 抓 URL，§22.4 #4）；
 - 失败抛 SearchError，调用方降级：对话照常、只记日志（§6.5）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -50,11 +51,13 @@ def _parse_result_blocks(blocks: list[dict]) -> list[dict]:
             if not url or url in seen:
                 continue
             seen.add(url)
-            items.append({
-                "url": url,
-                "title": (item.get("title") or "").strip() or url,
-                "page_age": (item.get("page_age") or "").strip(),
-            })
+            items.append(
+                {
+                    "url": url,
+                    "title": (item.get("title") or "").strip() or url,
+                    "page_age": (item.get("page_age") or "").strip(),
+                }
+            )
     return items
 
 
@@ -66,11 +69,21 @@ def search(query: str) -> list[dict]:
     body = {
         "model": config.SEARCH_MODEL,
         "max_tokens": config.SEARCH_MAX_TOKENS,
-        "messages": [{
-            "role": "user",
-            "content": [{"type": "text", "text": f"Perform a web search for the query: {query}"}],
-        }],
-        "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": config.SEARCH_MAX_USES}],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Perform a web search for the query: {query}"}
+                ],
+            }
+        ],
+        "tools": [
+            {
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": config.SEARCH_MAX_USES,
+            }
+        ],
     }
     headers = {
         "x-api-key": config.DEEPSEEK_API_KEY,

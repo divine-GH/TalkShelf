@@ -6,21 +6,19 @@
   不触 Ollama；真实语义评测走 scripts/eval_retrieval.py（本机 Ollama）。
 - 测试通过 TestClient 走完整 HTTP 层 + lifespan（含异步补做队列）。
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import shutil
 import sqlite3
-import tempfile
 import time
-from pathlib import Path
 
 import numpy as np
 import pytest
-from fastapi.testclient import TestClient
-
 from app import config, db, embedding, llm
+from fastapi.testclient import TestClient
 
 # 固定整理 JSON（§6.2 示例形态；LLM mock 的统一输出）
 ORGANIZED = {
@@ -88,13 +86,13 @@ def emb_ok(monkeypatch):
     相同文本 → 相同向量，可测向量召回/查重的结构正确性；
     真实语义评测不在 pytest 内（scripts/eval_retrieval.py，本机 Ollama）。
     """
-    monkeypatch.setattr(embedding, "embed_texts",
-                        lambda texts: [pseudo(t) for t in texts])
+    monkeypatch.setattr(embedding, "embed_texts", lambda texts: [pseudo(t) for t in texts])
 
 
 @pytest.fixture
 def llm_ok(monkeypatch):
     """LLM 正常：对话输出固定整理 JSON；force_json 整理与查重走 chat_json（按 system prompt 区分）。"""
+
     def fake_chat(messages, **kwargs):
         return json.dumps(ORGANIZED, ensure_ascii=False)
 
@@ -116,6 +114,7 @@ def llm_ok(monkeypatch):
 @pytest.fixture
 def llm_down(monkeypatch):
     """LLM 完全不可用（直存降级路径）。"""
+
     def boom(*a, **k):
         raise llm.LLMError("mock: DeepSeek 不可用")
 

@@ -4,6 +4,7 @@
 → LLM 判断 duplicate_of；Ollama 挂/库内无向量时退化为 FTS 关键词召回 Top-3。
 命中时笔记仍入库但标 status='duplicate'（绝不丢输入）；查重失败由调用方只记日志、不反噬（§21.2 #5）。
 """
+
 from __future__ import annotations
 
 import logging
