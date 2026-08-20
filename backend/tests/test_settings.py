@@ -1,8 +1,8 @@
-"""设置页与顶栏导航测试（UI 重构：顶栏只留「记录」「检索」+「更多功能」折叠，设置页占位）。
+"""设置页与顶栏导航测试（UI 重构：顶栏「记录/检索/更多功能」并排，设置页占位）。
 
 - GET /settings：占位页渲染（关于/版本信息），与其它页面一样受登录保护；
-- 顶栏导航：只留「记录」「检索」两个主按钮，其余功能收进「更多功能」折叠菜单；
-- 更名：「笔记」→「浏览全部笔记」、「问答」→「检索」；
+- 顶栏导航：「记录」「检索」「更多功能」三按钮并排一行，其余功能收进折叠菜单；
+- 更名：「笔记」→「浏览笔记」、「问答」→「检索」、「回顾」→「兴趣回顾」；
 - /static 静态资源带 Cache-Control: no-cache（浏览器每次重新校验，UI 改动即时生效）。
 """
 
@@ -23,8 +23,8 @@ def test_topbar_nav_restructure(client):
         ">记录<",
         ">检索<",
         ">更多功能<",
-        ">浏览全部笔记<",
-        ">回顾<",
+        ">浏览笔记<",
+        ">兴趣回顾<",
         ">统计<",
         ">设置<",
         'href="/ask"',
@@ -35,6 +35,9 @@ def test_topbar_nav_restructure(client):
     # 旧导航标签已消失（独立导航位被折叠菜单取代）
     assert ">笔记</a>" not in resp.text
     assert ">问答</a>" not in resp.text
+    # 旧命名已更名
+    assert "浏览全部笔记" not in resp.text
+    assert ">回顾<" not in resp.text
 
 
 def test_static_assets_revalidated(client):

@@ -39,6 +39,7 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .topbar .brand { font-weight: 700; text-decoration: none; color: var(--text); }
+.topbar nav { display: flex; align-items: center; } /* 记录/检索/更多功能 三按钮并排一行 */
 .topbar nav a {
   margin-left: 14px;
   text-decoration: none;
@@ -64,7 +65,6 @@ body {
   cursor: pointer;
 }
 .topbar nav .menu-btn.on { color: var(--primary); background: var(--user-bubble); font-weight: 600; }
-.menu-btn-caret { font-size: 0.7rem; margin-left: 4px; opacity: 0.55; }
 .menu-drop {
   position: absolute;
   right: 0;

@@ -15,10 +15,10 @@
       <a href="/ask" {% if active == 'ask' %}class="on"{% endif %}>检索</a>
       <div class="menu" id="more-menu">
         <button type="button" class="menu-btn{% if active in ('notes', 'review', 'stats', 'settings') %} on{% endif %}"
-                id="more-btn" aria-haspopup="true" aria-expanded="false">更多功能<span class="menu-btn-caret">▾</span></button>
+                id="more-btn" aria-haspopup="true" aria-expanded="false">更多功能</button>
         <div class="menu-drop" id="more-drop" hidden>
-          <a href="/notes" {% if active == 'notes' %}class="on"{% endif %}>浏览全部笔记</a>
-          <a href="/review" {% if active == 'review' %}class="on"{% endif %}>回顾</a>
+          <a href="/notes" {% if active == 'notes' %}class="on"{% endif %}>浏览笔记</a>
+          <a href="/review" {% if active == 'review' %}class="on"{% endif %}>兴趣回顾</a>
           <a href="/stats" {% if active == 'stats' %}class="on"{% endif %}>统计</a>
           <a href="/settings" {% if active == 'settings' %}class="on"{% endif %}>设置</a>
           {% if auth_enabled %}<a href="#" id="logout-link" class="nav-logout">退出</a>{% endif %}
