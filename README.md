@@ -14,12 +14,13 @@
 - **Ollama embedding**（bge-m3）：向量化入库、启动扫描补算；Ollama 挂时检索自动降级 FTS-only、查重退 FTS 近似版
 - **查重**（向量版）：命中标 duplicate 并记录目标 id（duplicate_of），Web 端提示"疑似重复于 #id"
 - **Web 检索页**：向量 + FTS + RRF 融合 + 材料层兜底召回 → LLM 作答带引用（点击跳转原笔记）
+- **检索记录**：提问成功自动保存（问题 + 答案 + 时间），默认上限 50 条（`SEARCH_HISTORY_LIMIT` 可配），超出自动删除最早记录；点击历史问题再次提问，可单条删除
 - **浏览页**（笔记列表）：分类浏览、kind 筛选、关键词搜索（FTS + 双字词 LIKE 兜底）、分页
 - **兴趣回顾页**：兴趣清单两分区（未决策：去做/留着/放弃；进行中：稍后/转收藏/删除）
 - **笔记详情页**（M3）：完整编辑（保存触发重整理：重算向量/重建 FTS/重新查重）、修正对话入口、来源对话展开、合并/忽略交互（合并含 merged 出索引）、重新整理、删除
 - **登录**（M3）：`.env` 配 `AUTH_PASSWORD` 即全局启用（argon2 + SQLite session + 失败限速 + CSRF）
 - **统计页 + 每周总结**（M3）：分类/标签/时间分布；LLM 生成周报（失败降级纯统计）
-- 95 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
+- 101 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
 
 ## 登录（M3，可选）
 

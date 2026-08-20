@@ -108,6 +108,14 @@ CREATE TABLE IF NOT EXISTS login_failures (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     attempted_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+
+-- 检索记录（§7 检索页：/api/ask 成功落一条，SEARCH_HISTORY_LIMIT 上限裁剪，可单条删除）
+CREATE TABLE IF NOT EXISTS search_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    question    TEXT NOT NULL,
+    answer      TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
 """
 
 
@@ -215,3 +223,37 @@ def fetch_note(conn: sqlite3.Connection, note_id: int) -> dict | None:
         for r in conn.execute("SELECT tag FROM tags WHERE note_id = ? ORDER BY tag", (note_id,))
     ]
     return note_to_dict(row, tags)
+
+
+# ---------------------------------------------------------------------------
+# 检索记录（§7 检索页：/api/ask 成功落一条；SEARCH_HISTORY_LIMIT 上限裁剪；单条删除）
+# ---------------------------------------------------------------------------
+
+
+def add_search_history(conn: sqlite3.Connection, question: str, answer: str) -> int:
+    """保存一条检索记录；超出 SEARCH_HISTORY_LIMIT 时同一事务内删除最早记录。返回记录 id。"""
+    cur = conn.execute(
+        "INSERT INTO search_history(question, answer) VALUES (?, ?)", (question, answer)
+    )
+    record_id = cur.lastrowid
+    conn.execute(
+        "DELETE FROM search_history WHERE id NOT IN "
+        "(SELECT id FROM search_history ORDER BY id DESC LIMIT ?)",
+        (config.SEARCH_HISTORY_LIMIT,),
+    )
+    return record_id
+
+
+def list_search_history(conn: sqlite3.Connection) -> list[dict]:
+    """检索记录列表（新→旧，最多 SEARCH_HISTORY_LIMIT 条）。"""
+    rows = conn.execute(
+        "SELECT id, question, answer, created_at FROM search_history ORDER BY id DESC LIMIT ?",
+        (config.SEARCH_HISTORY_LIMIT,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_search_history(conn: sqlite3.Connection, record_id: int) -> bool:
+    """删除单条检索记录；返回是否真的删了（不存在 → False）。"""
+    cur = conn.execute("DELETE FROM search_history WHERE id = ?", (record_id,))
+    return cur.rowcount > 0

@@ -129,6 +129,7 @@ VECTOR_MIN_SIM = float(
     os.getenv("VECTOR_MIN_SIM", "0.4")
 )  # Top-1 向量相似度阈值（§7：低于则视为召回不足）
 MATERIALS_TOP_K = _env_int("MATERIALS_TOP_K", 5)  # 材料层兜底召回条数
+SEARCH_HISTORY_LIMIT = _env_int("SEARCH_HISTORY_LIMIT", 50)  # 检索记录存储上限（条，超出删最早）
 
 # ---------------------------------------------------------------------------
 # 异步补做队列（设计文档 §5 / §14 第 5 条）

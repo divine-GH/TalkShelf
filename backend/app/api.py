@@ -800,6 +800,8 @@ def ask_question(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     except llm.LLMError as e:
         logger.warning("问答生成失败: %s", e)
         raise HTTPException(status_code=502, detail=f"问答服务不可用: {e}") from e
+    db.add_search_history(conn, question, answer)  # 检索记录：成功才落，上限裁剪在 db 层（§27）
+    conn.commit()
     return {
         "question": question,
         "answer": answer,
@@ -808,6 +810,26 @@ def ask_question(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
         "vector_ok": result["vector_ok"],
         "weak_recall": result["weak_recall"],
     }
+
+
+# ---------------------------------------------------------------------------
+# 检索记录（检索页历史：/api/ask 成功自动落一条；SEARCH_HISTORY_LIMIT 上限裁剪；单条删除）
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/search-history")
+def search_history_list(conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """检索记录列表（新→旧，最多 SEARCH_HISTORY_LIMIT 条）。"""
+    return {"items": db.list_search_history(conn), "limit": config.SEARCH_HISTORY_LIMIT}
+
+
+@router.delete("/api/search-history/{record_id}")
+def search_history_delete(record_id: int, conn: ConnDep, _auth: ApiAuthDep) -> JSONResponse:
+    """删除单条检索记录（不存在返回 404）。"""
+    if not db.delete_search_history(conn, record_id):
+        raise HTTPException(status_code=404, detail="检索记录不存在")
+    conn.commit()
+    return JSONResponse(status_code=204, content=None)
 
 
 # ---------------------------------------------------------------------------

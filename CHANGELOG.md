@@ -14,6 +14,9 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 
 ### Added
 
+- **检索记录**：检索页（/ask）提问结果下方新增历史记录——提问成功自动保存（问题 + 答案 + 时间），
+  默认上限 50 条（`.env` 可配 `SEARCH_HISTORY_LIMIT`），超出自动删除最早记录；点击历史问题可再次提问，
+  每条可单独删除（`GET /api/search-history` / `DELETE /api/search-history/{id}`）。
 - **设置页（占位）**：`/settings` 占位页（关于/版本信息），入口在顶栏「更多功能」折叠菜单；与其它页面一样受登录保护。
 - **版本管理基础设施**：`CHANGELOG.md`（本文件）+ git tag（v0.1.0/v0.2.0/v0.3.0）+ `config.APP_VERSION` +
   `GET /api/version`（免登录，部署探活 / 确认线上版本用）。
