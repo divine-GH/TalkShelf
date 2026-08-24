@@ -10,6 +10,31 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.8.0] - 2026-08-24
+
+本版本主要完成**开源发布准备**，把项目从「本机自用」打理成外部可读、可跑、可贡献的公开仓库。
+
+### Added
+
+- **开源许可证与第三方署名**：新增 `LICENSE`（MIT）与 `THIRD_PARTY_NOTICES.md`（DeepSeek Harness
+  web_search / web_fetch 的设计与输出约定、所参考的 AGPL 第二大脑项目独立实现声明）。
+- **项目元数据 `pyproject.toml`**：声明 name / version / requires-python（>=3.11）/ dependencies / license，
+  依赖与 `requirements.txt` 对齐。
+- **CI（`.github/workflows/ci.yml`）**：`ruff check` + `ruff format --check` + `pytest`，Python 3.11 / 3.13 矩阵。
+- **跨平台启动入口**：新增 `Makefile`（macOS/Linux 的 run/test/lint/check/eval）；
+  `start.ps1` 的 Ollama 路径改为可探测（`OLLAMA_PATH` 环境变量 / PATH / 常见安装目录），换机器/装到别处也能找到。
+- **SQLite 版本守卫**：`db.py` 启动时校验 SQLite >= 3.34（FTS5 trigram 前提），过旧报清晰错误
+  而非 `CREATE VIRTUAL TABLE` 神秘失败。
+- **已知问题文档** `已知问题.md`。
+
+### Changed
+
+- **README 跨平台化**：去除所有本机绝对路径，补前置依赖（Python >= 3.11、SQLite >= 3.34、DeepSeek key、
+  可选 Ollama）与单用户 + 单 worker 架构约束；安装/运行/测试/lint 覆盖 Windows + macOS/Linux。
+- **开源清理**：移除对第三方同类产品的引用、去掉指向已私有化内部文档的悬空引用；删除从未被调用的
+  `material_fts_delete`；整合文档一致性并补 `.gitignore` 防御。
+- **`.gitattributes` 统一行尾**：`Makefile` 与 `*.sh` 强制 LF（避免 Windows 检出时被 CRLF 污染使 `make` 报错）。
+
 ## [0.7.6] - 2026-08-20
 
 ### Changed

@@ -7,6 +7,12 @@
 > 本项目是**本地单用户**应用：数据存本地 SQLite，运行即 `uvicorn --workers 1`
 > （任务队列在进程内存，多 worker 会重复处理 pending，见设计文档 §5）。请勿当作多租户服务使用。
 
+## 声明（作者与 AI 生成）
+
+这是我（divine-GH）的**第一个项目**——从 0 到能跑通，是我做出「要不要留、往哪走」这些决策、并把体验调到顺手的成果。
+项目的**代码与文档均由 AI 生成**（模型：DeepSeek V4 Flash 0731），我主要负责**决策**：定方向、拍板方案、验证效果、把控使用体验。
+第一版必然有不足。若你发现问题、有改进建议，或想一起把它变得更好，非常欢迎提 **Issue / PR**，我会**虚心接受、认真对待**。
+
 ## 当前进度（M3 完成）
 
 - **Web 对话式记录**：像聊天一样输入 → LLM 理解/追问/整理 JSON → 用户拍板（收藏/兴趣）落库
@@ -138,9 +144,9 @@ python scripts/eval_retrieval.py
 
 ## 版本与更新记录
 
-- 语义化版本：当前版本见 `backend/app/config.py` 的 `APP_VERSION`（`0.7.6`，与 git tag `v0.7.6` 对应）。
-- `CHANGELOG.md`：Keep a Changelog 格式，每版本一节（`## [X.Y.Z] - 日期`），按版本/日期检索 `grep "\[0.7.6\]" CHANGELOG.md`；发版 = bump 版本号 → CHANGELOG 追加 → `git tag -a vX.Y.Z`。
-- 版本探活：`GET /api/version`（免登录）→ `{"name": "note-brain", "version": "0.7.6"}`，部署后确认线上版本用。
+- 语义化版本：当前版本见 `backend/app/config.py` 的 `APP_VERSION`（`0.8.0`，与 git tag `v0.8.0` 对应）。
+- `CHANGELOG.md`：Keep a Changelog 格式，每版本一节（`## [X.Y.Z] - 日期`），按版本/日期检索 `grep "\[0.8.0\]" CHANGELOG.md`；发版 = bump 版本号 → CHANGELOG 追加 → `git tag -a vX.Y.Z`。
+- 版本探活：`GET /api/version`（免登录）→ `{"name": "note-brain", "version": "0.8.0"}`，部署后确认线上版本用。
 
 ## 目录结构
 
