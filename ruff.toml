@@ -5,8 +5,11 @@
 
 # 行宽：项目中文注释/文档字符串多，统一 100。
 # 注：ruff format 不重排字符串与注释内容，只会排版可拆分的代码结构。
+# target-version 按 CI 矩阵最低版本（3.11）声明；本地开发用 3.14 不受影响。
+# 注意：ruff 0.15+ 在 target py314+ 下会把 except (A, B): 规范化为无括号形式（PEP 758），
+# 该语法仅 3.14+ 合法、3.11/3.13 是 SyntaxError（ruff issue #25550，修复未发布），故不声明 py314。
 line-length = 100
-target-version = "py314"
+target-version = "py311"
 
 [lint]
 # 默认规则已启用；扩展位示例（启用前先看 README 说明）：
