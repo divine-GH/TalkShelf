@@ -1,4 +1,4 @@
-"""DeepSeek 原生联网搜索冒烟脚本（设计文档 §6.5 / §22.1，开工准备清单 §四）。
+"""DeepSeek 原生联网搜索冒烟脚本（设计文档 §6.5 / §22.1）。
 
 验证点：
 1. DEEPSEEK_API_KEY 在 Anthropic 兼容端点（api.deepseek.com/anthropic/v1）可用；

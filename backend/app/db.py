@@ -2,7 +2,7 @@
 
 设计文档 §4 数据模型。要点：
 - 连接级 PRAGMA 必开：foreign_keys=ON（外键级联默认关闭）、journal_mode=WAL（读写并发更稳）。
-- 建表脚本幂等（CREATE TABLE IF NOT EXISTS），单用户手动迁移（开工准备清单 §3.5 拍板：不用 Alembic）。
+- 建表脚本幂等（CREATE TABLE IF NOT EXISTS），单用户手动迁移，不用 Alembic。
 - FTS5 trigram 虚拟表独立于业务表（自带文本副本），rowid 与主表 id 一一对应；
   同步统一走应用层函数 fts_sync / fts_delete / material_fts_sync，调用方保证与业务写在同一事务内。
 """
