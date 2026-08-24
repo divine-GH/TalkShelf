@@ -206,10 +206,6 @@ def material_fts_sync(conn: sqlite3.Connection, material_id: int) -> None:
     )
 
 
-def material_fts_delete(conn: sqlite3.Connection, material_id: int) -> None:
-    conn.execute("DELETE FROM materials_fts WHERE rowid = ?", (material_id,))
-
-
 def _scalar(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> object | None:
     row = conn.execute(sql, params).fetchone()
     return row[0] if row else None
