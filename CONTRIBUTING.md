@@ -1,6 +1,6 @@
-# Contributing to note-brain
+# Contributing to TalkShelf
 
-感谢你有兴趣一起把 note-brain 做得更好！这个项目由 AI 辅助开发（见 README「声明」），
+感谢你有兴趣一起把 TalkShelf 做得更好！这个项目由 AI 辅助开发（见 README「声明」），
 我很欢迎外部贡献——提 Issue 或 PR 都好，我会**虚心接受、认真对待**。
 
 ## 环境要求
@@ -12,7 +12,7 @@
 
 ```bash
 # 克隆你自己的 fork 并进入目录（提交 PR 用 fork）
-git clone <your-fork> note-brain && cd note-brain
+git clone <your-fork> TalkShelf && cd TalkShelf
 
 # 创建虚拟环境并装依赖
 python -m venv .venv

@@ -1,4 +1,4 @@
-"""note-brain M2 端到端真实冒烟（真实 DeepSeek + 真实 Ollama，花几分钱）。
+"""TalkShelf M2 端到端真实冒烟（真实 DeepSeek + 真实 Ollama，花几分钱）。
 
 验证链路：对话式记录（真实整理 JSON）→ 拍板落库 → 队列补做（真实 embedding + 向量查重）
 → /api/ask 真实检索 + 真实作答。用临时库（DATABASE_PATH 覆盖），不碰真实数据。

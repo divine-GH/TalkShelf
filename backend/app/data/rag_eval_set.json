@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "description": "note-brain 检索回归测试集：26 道基于种子笔记库（backend/app/data/seed_notes.py）的问题，用于验证检索能否命中期望来源。问题刻意覆盖四种召回路径：向量语义（措辞不同）、FTS 关键词、材料层兜底（词只在抓取正文里）、raw 原话兜底。防改代码时检索悄悄退化（设计文档 §12 M2）。",
+  "description": "TalkShelf 检索回归测试集：26 道基于种子笔记库（backend/app/data/seed_notes.py）的问题，用于验证检索能否命中期望来源。问题刻意覆盖四种召回路径：向量语义（措辞不同）、FTS 关键词、材料层兜底（词只在抓取正文里）、raw 原话兜底。防改代码时检索悄悄退化（设计文档 §12 M2）。",
   "total": 26,
   "pass_threshold": 0.8,
   "questions": [

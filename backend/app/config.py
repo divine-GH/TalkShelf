@@ -1,4 +1,4 @@
-"""note-brain 配置层。
+"""TalkShelf 配置层。
 
 设计文档 §3.4「配置层清单」：把散落在各章节的配置项收集到一处。
 所有配置项均可被同名环境变量覆盖（.env 由 python-dotenv 加载）。
@@ -21,8 +21,8 @@ load_dotenv(BASE_DIR / ".env")
 # ---------------------------------------------------------------------------
 # 版本信息（语义化版本；发版流程：bump APP_VERSION → CHANGELOG.md 追加 → git tag vX.Y.Z）
 # ---------------------------------------------------------------------------
-APP_NAME = "note-brain"
-APP_VERSION = "0.8.1"  # 与最近的 vX.Y.Z tag 对应；发新版本时 bump
+APP_NAME = "TalkShelf"
+APP_VERSION = "0.9.0"  # 与最近的 vX.Y.Z tag 对应；发新版本时 bump
 
 
 def _env_int(name: str, default: int) -> int:
@@ -34,10 +34,10 @@ def _env_int(name: str, default: int) -> int:
 
 
 # ---------------------------------------------------------------------------
-# 数据库（设计文档 §4；拍板：note-brain/data/note-brain.db，不入库）
+# 数据库（设计文档 §4；拍板：TalkShelf/data/talkshelf.db，不入库）
 # ---------------------------------------------------------------------------
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
-DATABASE_PATH = Path(os.getenv("DATABASE_PATH", str(DATA_DIR / "note-brain.db")))
+DATABASE_PATH = Path(os.getenv("DATABASE_PATH", str(DATA_DIR / "talkshelf.db")))
 
 # ---------------------------------------------------------------------------
 # DeepSeek（设计文档 §6；chat-completions 基址）
@@ -148,7 +148,7 @@ BACKOFF_SCHEDULE = [60, 300, 900, 3600, 21600]
 # ---------------------------------------------------------------------------
 AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "")  # 明文密码，启动时 argon2 哈希化；空 = 不启用登录
 AUTH_SESSION_DAYS = _env_int("AUTH_SESSION_DAYS", 30)  # 会话有效期
-AUTH_COOKIE_NAME = "NB_SESSION"
+AUTH_COOKIE_NAME = "TALKSHELF_SESSION"
 AUTH_COOKIE_SECURE = (
     os.getenv("AUTH_COOKIE_SECURE", "") == "1"
 )  # 部署 HTTPS 时置 1（本地 http 必须关）

@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="csrf-token" content="{{ request.state.csrf_token or '' }}">
-  <title>{% block title %}note-brain{% endblock %}</title>
+  <title>{% block title %}TalkShelf{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/">note-brain</a>
+    <a class="brand" href="/">TalkShelf</a>
     <nav>
       <a href="/" {% if active == 'index' %}class="on"{% endif %}>记录</a>
       <a href="/ask" {% if active == 'ask' %}class="on"{% endif %}>检索</a>

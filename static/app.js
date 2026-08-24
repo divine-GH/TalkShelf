@@ -1,4 +1,4 @@
-// note-brain 页面脚本（原生 JS，无框架；具体逻辑在各模板的 script 块内）
+// TalkShelf 页面脚本（原生 JS，无框架；具体逻辑在各模板的 script 块内）
 
 // CSRF：登录启用时，所有非安全方法的 fetch 自动带 X-CSRF-Token 头（§9）。
 // token 由 base.html 的 <meta name="csrf-token"> 注入（未登录/未启用时为空串）。

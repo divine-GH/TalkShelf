@@ -1,4 +1,4 @@
-"""note-brain 检索回归评测（设计文档 §12 M2 / §15.3 #1）。
+"""TalkShelf 检索回归评测（设计文档 §12 M2 / §15.3 #1）。
 
 用法（在仓库根目录，venv 已激活）：
     & '.venv\\Scripts\\python.exe' scripts/eval_retrieval.py            # 临时库 + 种子数据 + 评测
@@ -96,7 +96,7 @@ def run_eval(conn, title_to_id: dict[str, int], threshold: float) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="note-brain 检索回归评测")
+    ap = argparse.ArgumentParser(description="TalkShelf 检索回归评测")
     ap.add_argument("--keep", action="store_true", help="保留临时库（默认评测后删除）")
     ap.add_argument(
         "--threshold", type=float, default=None, help="通过率阈值（默认读评测集 pass_threshold）"

@@ -1,1 +1,1 @@
-"""note-brain 应用包。"""
+"""TalkShelf 应用包。"""

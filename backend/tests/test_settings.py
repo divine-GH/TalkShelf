@@ -19,7 +19,7 @@ def test_settings_page_html(client):
     for fragment in (
         "设置",
         "关于",
-        "note-brain — 个人知识速记工具",
+        "TalkShelf — 个人知识速记工具",
         "当前版本 v",
         "每周总结用 AI 生成",
         "默认分类",

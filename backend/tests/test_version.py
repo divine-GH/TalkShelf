@@ -17,7 +17,7 @@ def test_version_endpoint_public(client):
     resp = client.get("/api/version")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["name"] == "note-brain"
+    assert data["name"] == "TalkShelf"
     assert data["version"] == config.APP_VERSION
 
 

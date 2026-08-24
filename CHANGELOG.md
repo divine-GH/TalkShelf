@@ -1,6 +1,6 @@
 # Changelog
 
-note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
+TalkShelf 的版本更新记录。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
 与 git 的分工：提交粒度看 `git log`，版本粒度看本文件，git tag（`vX.Y.Z`）是两者之间的锚点
@@ -10,6 +10,18 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.9.0] - 2026-08-24
+
+### Changed
+
+- **项目更名：note-brain → TalkShelf**（全面替换产品/项目名）。
+  - 应用名 `APP_NAME` 与新标题/新顶栏品牌名统一为 **TalkShelf**；
+  - pip 包名 `pyproject.toml [project].name` 改为 **talkshelf**；
+  - 登录 cookie 名 `NB_SESSION` → `TALKSHELF_SESSION`；
+  - 数据库文件 `data/note-brain.db` → `data/talkshelf.db`（旧文件已迁移，数据不丢）；
+  - 文档、README、模板标题、LLM 提示词、脚本注释、环境变量示例中的产品名同步更新。
+  - 命中说明：产品/项目名替换为新名，物理路径与仓库目录（`note-brain/`）保持原样。
+
 ## [0.8.1] - 2026-08-24
 
 ### Added
@@ -18,7 +30,7 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 - **README 顶部徽章**：CI / License / Python / ruff（CI 徽章的仓库路径待填，见 README 注释）。
 - **隐私说明（数据边界）**：明确笔记主要存本地 SQLite，LLM / 搜索 / 抓取时相关文本会离开本机，
   以及如何更保守地使用。
-- **备份指引**：WAL 模式下先 checkpoint 再复制 `data/note-brain.db`，或用 `sqlite3 .backup`。
+- **备份指引**：WAL 模式下先 checkpoint 再复制 `data/talkshelf.db`，或用 `sqlite3 .backup`。
 
 ## [0.8.0] - 2026-08-24
 

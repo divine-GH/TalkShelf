@@ -177,7 +177,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """旧库增量迁移（CREATE TABLE IF NOT EXISTS 不会给已有表加列）。
 
     M3（§24）：notes 加 duplicate_of 列（查重判定目标落库，供详情页「疑似重复于 #id」与合并）。
-    新增列必须走这里，否则老库（如 data/note-brain.db）不会带出新列。
+    新增列必须走这里，否则老库（如 data/talkshelf.db）不会带出新列。
     """
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(notes)")}
     if "duplicate_of" not in cols:

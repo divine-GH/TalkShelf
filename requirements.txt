@@ -1,4 +1,4 @@
-# note-brain 运行时依赖清单（单机项目，无需锁文件）
+# TalkShelf 运行时依赖清单（单机项目，无需锁文件）
 # 测试/开发工具（pytest、ruff）见 requirements-dev.txt
 fastapi
 uvicorn

@@ -1,4 +1,4 @@
-# note-brain 在 macOS / Linux 下的便捷入口（Windows 请用 start.ps1）。
+# TalkShelf 在 macOS / Linux 下的便捷入口（Windows 请用 start.ps1）。
 # 通过 PY 覆盖解释器：make run PY=python3.12
 PY      ?= python3
 VENV    := .venv
