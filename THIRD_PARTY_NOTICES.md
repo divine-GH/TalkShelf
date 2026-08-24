@@ -22,8 +22,8 @@ Copyright (c) 2026 DeepSeek
 ## Second-brain reference project (AGPL-3.0) — idea reference only
 
 The local Ollama embedding / vectorization *approach* in
-`backend/app/embedding.py` is inspired by the "second brain" project
-[`同类产品`](https://github.com/同类产品/同类产品), which is licensed under
-**AGPL-3.0**. No code from 同类产品 is copied into this project; the design is
-an independent reimplementation (different endpoint, model, storage, and
-library choices). This notice does not impose AGPL obligations on this project.
+`backend/app/embedding.py` follows a common "second brain" design pattern. No
+code from any AGPL-3.0 second-brain project is copied into this project; the
+design is an independent reimplementation (different endpoint, model, storage,
+and library choices). This notice does not impose AGPL obligations on this
+project.

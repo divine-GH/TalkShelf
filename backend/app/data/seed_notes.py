@@ -1,8 +1,8 @@
 """检索回归测试集：种子笔记数据（设计文档 §12 M2 / §15.3 #1）。
 
 用途：scripts/eval_retrieval.py 把本数据写入临时库并跑真实检索评测；
-防改代码时检索悄悄退化。评测集采用「问题 + 期望命中笔记」标注格式
-（question + expected_source 标注），评测问题见 rag_eval_set.json。
+防改代码时检索悄悄退化。评测集采用「问题 + 期望命中笔记」标注格式，
+评测问题见 rag_eval_set.json。
 
 本文件只定义笔记数据；评测逻辑在 scripts/eval_retrieval.py。
 """
