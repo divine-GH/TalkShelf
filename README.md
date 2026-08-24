@@ -2,7 +2,7 @@
 
 个人知识速记工具：记录零负担，整理交给 AI，查找用对话代替翻笔记。
 
-设计唯一事实源：`设计文档.md`（§1~§24）；里程碑 M1→M4 见 §12。
+设计唯一事实源：`设计文档.md`（§1~§35）；里程碑 M1→M4 见 §12。
 
 ## 当前进度（M3 完成）
 
@@ -20,7 +20,7 @@
 - **笔记详情页**（M3）：完整编辑（保存触发重整理：重算向量/重建 FTS/重新查重）、修正对话入口、来源对话展开、合并/忽略交互（合并含 merged 出索引）、重新整理、删除
 - **登录**（M3）：`.env` 配 `AUTH_PASSWORD` 即全局启用（argon2 + SQLite session + 失败限速 + CSRF）
 - **统计页 + 每周总结**（M3）：分类/标签/时间分布；LLM 生成周报（失败降级纯统计）
-- 101 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
+- 142 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
 
 ## 登录（M3，可选）
 
@@ -78,10 +78,10 @@ LLM 与 embedding 全部 mock（`tests/conftest.py`：固定整理 JSON + 确定
 
 ## 版本与更新记录
 
-- 语义化版本：当前版本见 `backend/app/config.py` 的 `APP_VERSION`（`0.3.0`，与 git tag `v0.3.0` 对应）。
-- `CHANGELOG.md`：Keep a Changelog 格式，每版本一节（`## [0.3.0] - 2026-08-20`），按版本/日期检索
-  `grep "\[0.3.0\]" CHANGELOG.md`；发版 = bump 版本号 → CHANGELOG 追加 → `git tag -a vX.Y.Z`。
-- 版本探活：`GET /api/version`（免登录）→ `{"name": "note-brain", "version": "0.3.0"}`，部署后确认线上版本用。
+- 语义化版本：当前版本见 `backend/app/config.py` 的 `APP_VERSION`（`0.7.6`，与 git tag `v0.7.6` 对应）。
+- `CHANGELOG.md`：Keep a Changelog 格式，每版本一节（`## [X.Y.Z] - 日期`），按版本/日期检索
+  `grep "\[0.7.6\]" CHANGELOG.md`；发版 = bump 版本号 → CHANGELOG 追加 → `git tag -a vX.Y.Z`。
+- 版本探活：`GET /api/version`（免登录）→ `{"name": "note-brain", "version": "0.7.6"}`，部署后确认线上版本用。
 
 ## 目录结构
 

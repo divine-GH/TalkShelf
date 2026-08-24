@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .venv/
+.ruff_cache/
 
 # 环境与密钥（key 不进 git，设计文档 §9）
 .env
@@ -19,5 +20,6 @@ data/
 .pytest_cache/
 pytest-cache-files-*/
 nb-test-*/
+.nb-smoke-e2e-*/
 # 遗留的 ACL 损坏目录（os.mkdir(0o700) 产物，无法在沙箱内删除，等待手动清理）
 _probe700/
