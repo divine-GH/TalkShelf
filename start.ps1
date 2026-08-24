@@ -4,7 +4,26 @@
 # 停止：在窗口中按 Ctrl+C
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$ollama = 'C:\Users\Admin\AppData\Local\Programs\Ollama\ollama.exe'
+# 查找 Ollama 可执行文件：优先环境变量 OLLAMA_PATH，再到 PATH，再到常见安装目录；
+# 找不到则 $ollama 为 $null（分发环境没装 Ollama 也能用——设置页可关闭「本地 Embedding」，见 README）。
+# 跨机器可用（Windows / macOS / Linux 的 PowerShell 通用）。
+$ollama = $null
+if ($env:OLLAMA_PATH -and (Test-Path $env:OLLAMA_PATH)) {
+    $ollama = $env:OLLAMA_PATH
+} elseif (Get-Command ollama -ErrorAction SilentlyContinue) {
+    $ollama = (Get-Command ollama).Source
+} else {
+    foreach ($cand in @(
+        "$env:ProgramFiles\Ollama\ollama.exe",
+        "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe",
+        "$HOME\Applications\Ollama\ollama.exe",
+        "/usr/local/bin/ollama",
+        "/opt/homebrew/bin/ollama",
+        "/usr/bin/ollama"
+    )) {
+        if ($cand -and (Test-Path $cand)) { $ollama = $cand; break }
+    }
+}
 $python = Join-Path $root '.venv\Scripts\python.exe'
 $hostAddr = '127.0.0.1'   # 本机访问。想用手机/局域网访问改成 '0.0.0.0'
 
@@ -12,7 +31,7 @@ Write-Host '=== note-brain 启动 ==='
 
 # 1. 确保 Ollama + bge-m3 可用（未安装 Ollama 则跳过：分发环境可在设置页关闭「本地 Embedding」）
 $needStart = $false
-if (Test-Path $ollama) {
+if ($ollama) {
     try {
         $tags = Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 3
         $hasModel = $tags.models | Where-Object { $_.name -like 'bge-m3*' }

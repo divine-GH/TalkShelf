@@ -1,0 +1,34 @@
+# note-brain 项目元数据（打包元数据声明）
+#
+# 注意：
+# - 本项目「从源码运行，不 pip install .」（见 README），无 build-system，仅声明元数据；
+#   依赖以 requirements.txt / requirements-dev.txt 为准（CI 与本地安装都用它们）。
+# - ruff 配置仍在 ruff.toml；此处【不要】加 [tool.ruff]，否则 ruff 会因配置源冲突报错。
+# - version 与 backend/app/config.py 的 APP_VERSION 保持一致（不要只改一处）。
+
+[project]
+name = "note-brain"
+version = "0.7.6"
+description = "个人知识速记工具：记录零负担，整理交给 AI，查找用对话代替翻笔记。"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "divine-GH" }]
+keywords = ["note", "knowledge-base", "sqlite", "fts5", "llm", "deepseek", "fastapi"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Chinese (Simplified)",
+    "Programming Language :: Python :: 3.11",
+    "Framework :: FastAPI",
+]
+# 依赖与 requirements.txt 保持一致（单机项目，暂不锁版本）
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "numpy",
+    "markdownify",
+    "jinja2",
+    "python-dotenv",
+    "argon2-cffi",
+]

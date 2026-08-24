@@ -2,7 +2,10 @@
 
 个人知识速记工具：记录零负担，整理交给 AI，查找用对话代替翻笔记。
 
-设计唯一事实源：`设计文档.md`（§1~§35）；里程碑 M1→M4 见 §12。
+设计唯一事实源：[设计文档.md](设计文档.md)（§1~§35）；里程碑 M1→M4 见 §12。
+
+> 本项目是**本地单用户**应用：数据存本地 SQLite，运行即 `uvicorn --workers 1`
+> （任务队列在进程内存，多 worker 会重复处理 pending，见设计文档 §5）。请勿当作多租户服务使用。
 
 ## 当前进度（M3 完成）
 
@@ -22,65 +25,121 @@
 - **统计页 + 每周总结**（M3）：分类/标签/时间分布；LLM 生成周报（失败降级纯统计）
 - 142 个 pytest 用例（LLM/embedding 全 mock），真实 DeepSeek + Ollama 端到端冒烟通过
 
-## 登录（M3，可选）
+## 前置依赖（Prerequisites）
 
-在 `.env` 配置 `AUTH_PASSWORD=你的密码` 即启用登录（页面跳登录页、API 返 401）；
-不配置则登录关闭（本地开发零负担）。其它可选配置（会话天数、锁定参数）见 `.env.example`。
-部署 HTTPS 后把 `AUTH_COOKIE_SECURE=1`（本地 http 必须保持 0）。
+| 依赖 | 是否必装 | 说明 |
+|---|---|---|
+| **Python ≥ 3.11** | 必装 | 运行环境。见下方「SQLite 版本的坑」 |
+| **SQLite ≥ 3.34** | 必装（随 Python 附带） | FTS5 **trigram** 分词的前提（设计文档 §4）。`CREATE VIRTUAL TABLE ... tokenize='trigram'` 需要它。启动时应用会校验并给出清晰错误。**装好后先确认**：`python -c "import sqlite3;print(sqlite3.sqlite_version)"` |
+| **DeepSeek API Key** | 必装 | 对话/整理/问答/每周总结全靠它（`DEEPSEEK_API_KEY`，见 `.env.example`） |
+| **Ollama + `bge-m3`** | 可选 | 语义检索 + 向量查重（`http://127.0.0.1:11434`）。**没装也能用**：设置页把「本地 Embedding」关闭（或 `.env` 设 `EMBEDDING_ENABLED=0`），自动退化为 FTS 检索 + 查重近似版 |
 
-## 检索回归评测（改检索代码后必跑）
+> **SQLite 版本的坑**：`sqlite3` 模块的 SQLite 版本取决于你的 Python 发行版，**不是** Python 版本本身。
+> 绝大多数 Python 3.11+ 自带 ≥ 3.34，但部分 Linux 发行版/旧 Python 可能打包了旧 SQLite。
+> 若启动报「SQLite >= 3.34 required」，需升级 Python 或发行版包（`apt/brew upgrade python3`、`python3-sqlite3` 等）。
+
+## 安装（Install）
+
+以下命令跨 Windows / macOS / Linux。**统一做法**：创建虚拟环境、激活它，后续一律用激活后的 `python`。
 
 ```powershell
-& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' scripts/eval_retrieval.py
+# 第一步：从源码装依赖（可选：用 venv 隔离）
+python -m venv .venv
+
+# Windows（PowerShell）
+.venv\Scripts\Activate.ps1
+# macOS / Linux
+source .venv/bin/activate
+
+# 安装运行时依赖（测试工具在 requirements-dev.txt）
+pip install -r requirements.txt
+pip install -r requirements-dev.txt        # pytest + ruff，开发/贡献者用
 ```
 
-种子库（24 条笔记 + 2 条材料）→ 真实 Ollama 算 embedding → 26 问逐条验证期望来源在召回 Top-N，
-报通过率（阈值 0.8，低于即 exit 1）。Ollama 不可用时自动退化为 FTS-only 关键词评测。
-
-## 启动（必须单 worker）
-
-**一键启动**：右键 `start.ps1` → 「使用 PowerShell 运行」（自动拉起 Ollama 并启动服务，Ctrl+C 停止）。
-
-手动方式：
+配置环境变量：
 
 ```powershell
+copy .env.example .env        # Windows
+# cp .env.example .env        # macOS / Linux
+# 编辑 .env：至少填 DEEPSEEK_API_KEY；需要语义检索就设 EMBEDDING_ENABLED=1
+```
+
+> 注：本项目**从源码运行，不 `pip install .`**（不要当普通 Python 包安装）。依赖以 `requirements.txt` 为准。
+
+> 若你系统装不了 venv 或不想用：直接把上面 `pip install -r requirements.txt` 装进你的 Python 环境，并把启动命令里的 `python` 换成你的解释器即可。这会使 `.env` 与 data 目录落在仓库内（见 config.py `BASE_DIR`）。
+
+## 运行（Run）
+
+**必须单 worker（`--workers 1`）**：异步补做队列在进程内存，多 worker 会重复处理 pending（设计文档 §5）。
+
+Windows 一键启动（自动拉起 Ollama + 启动服务，Ctrl+C 停止）：
+
+```powershell
+start.ps1
+```
+
+macOS / Linux 一键启动：
+
+```bash
+make run
+```
+
+手动方式（先按上面激活 venv，再 `cd backend`）：
+
+```powershell
+# Windows PowerShell 5.1：控制台不解析 ANSI 颜色码，加 --no-use-colors 避免 [32mINFO[0m 乱码
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-use-colors
+```
+
+```bash
+# macOS / Linux
 cd backend
-& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-use-colors
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-`--no-use-colors`：Windows PowerShell 5.1 控制台不解析 ANSI 颜色码（会原样打印 `[32mINFO[0m` 乱码），故统一禁用颜色。
+- 数据文件：`data/note-brain.db`（自动创建，已 gitignore；备份 = 复制该文件）
+- 访问：`http://127.0.0.1:8000`
+- 想用手机/局域网访问：把 `--host` 改成 `0.0.0.0`（注意同时配置登录，见下）
 
-⚠️ `--workers 1` 是硬性要求：异步补做队列在进程内存，多 worker 会重复处理 pending（设计文档 §5）。
-数据文件：`note-brain/data/note-brain.db`（自动创建，不入库；备份 = 复制该文件）。
-依赖服务：Ollama（`http://127.0.0.1:11434`，需 `bge-m3` 模型；挂了自动降级，不影响使用；没装可在设置页关闭「本地 Embedding」）。
+## 登录（可选，M3）
+
+`.env` 配置 `AUTH_PASSWORD=你的密码` 即启用登录（页面跳登录页、API 返 401）；不配置则关闭（本地开发零负担）。其它可选配置（会话天数、锁定参数）见 `.env.example`。部署 HTTPS 后把 `AUTH_COOKIE_SECURE=1`（本地 http 必须保持 0）。
 
 ## 测试
 
 ```powershell
 cd backend
-& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m pytest
+python -m pytest
 ```
 
 LLM 与 embedding 全部 mock（`tests/conftest.py`：固定整理 JSON + 确定性伪向量），不触网、不花钱。
 
 ## 代码规范（lint / format）
 
-静态检查（未使用导入/变量、未定义名字、过时写法、时区陷阱等）与排版统一用
-[ruff](https://docs.astral.sh/ruff/)（配置：`ruff.toml`，采用 ruff 0.16 默认规则集，line-length 100）：
+静态检查（未使用导入/变量、未定义名字、过时写法、时区陷阱等）与排版统一用 [ruff](https://docs.astral.sh/ruff/)（配置：`ruff.toml`，采用 ruff 0.16 默认规则集，`target-version = "py314"`，line-length 100）：
+
+下面的命令在**仓库根目录**运行（`ruff.toml` 在根）：
 
 ```powershell
-& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m ruff check .          # lint
-& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m ruff check . --fix    # 自动修复可安全修的问题
-& 'E:\note-brain\note-brain\.venv\Scripts\python.exe' -m ruff format .         # format：统一排版
+python -m ruff check .            # lint
+python -m ruff check . --fix      # 自动修复可安全修的问题
+python -m ruff format .           # format：统一排版
 ```
 
 测试/开发工具在 `requirements-dev.txt`（pytest、ruff）：`pip install -r requirements-dev.txt`。
 
+## 检索回归评测（改检索代码后必跑）
+
+```powershell
+python scripts/eval_retrieval.py
+```
+
+种子库（24 条笔记 + 2 条材料）→ 真实 Ollama 算 embedding → 26 问逐条验证期望来源在召回 Top-N，报通过率（阈值 0.8，低于即 exit 1）。Ollama 不可用时自动退化为 FTS-only 关键词评测。
+
 ## 版本与更新记录
 
 - 语义化版本：当前版本见 `backend/app/config.py` 的 `APP_VERSION`（`0.7.6`，与 git tag `v0.7.6` 对应）。
-- `CHANGELOG.md`：Keep a Changelog 格式，每版本一节（`## [X.Y.Z] - 日期`），按版本/日期检索
-  `grep "\[0.7.6\]" CHANGELOG.md`；发版 = bump 版本号 → CHANGELOG 追加 → `git tag -a vX.Y.Z`。
+- `CHANGELOG.md`：Keep a Changelog 格式，每版本一节（`## [X.Y.Z] - 日期`），按版本/日期检索 `grep "\[0.7.6\]" CHANGELOG.md`；发版 = bump 版本号 → CHANGELOG 追加 → `git tag -a vX.Y.Z`。
 - 版本探活：`GET /api/version`（免登录）→ `{"name": "note-brain", "version": "0.7.6"}`，部署后确认线上版本用。
 
 ## 目录结构
@@ -99,7 +158,16 @@ scripts/            eval_retrieval.py（检索回归评测）| smoke_e2e.py（�
 data/               运行数据（不入库）
 ```
 
+## 架构约束（公开仓库重要说明）
+
+- **单用户**：本地 SQLite 单文件，无多租户/权限/并发扩展设计。
+- **必须 `--workers 1`**：异步补做队列在进程内存，多 worker 会重复处理 pending。
+- **数据主权在家**：所有数据存本地，LLM 调用走你的 DeepSeek key（联网）。抓取/搜索功能会上网，其余离线可用。
+
 ## 已知遗留（不影响使用）
 
-- 早期 `os.mkdir(0o700)` 产生的 ACL 损坏目录（`backend/_probe700/`、`.pytest-tmp/`、`pytest-cache-files-*/` 等）已清理；
-  相关路径仍保留在 `.gitignore` 防御。若再出现这类「创建者自己都进不去」的目录，用管理员手动删。
+- 早期 `os.mkdir(0o700)` 产生的 ACL 损坏目录（`backend/_probe700/`、`.pytest-tmp/`、`pytest-cache-files-*/` 等）已清理；相关路径仍保留在 `.gitignore` 防御。若再出现这类「创建者自己都进不去」的目录，用管理员手动删。
+
+## 许可证
+
+[MIT License](LICENSE)。第三方署名与参考声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

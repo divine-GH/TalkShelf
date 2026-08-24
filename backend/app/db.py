@@ -141,8 +141,27 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
     return conn
 
 
+# SQLite >= 3.34 是 FTS5 trigram 分词的前提（设计文档 §4；README「前置依赖」）。
+# 对比字符串版本号（如 "3.53.1" -> (3,53,1)），过旧则报清晰错误，避免 CREATE VIRTUAL TABLE 神秘失败。
+MIN_SQLITE_VERSION = (3, 34)
+
+
+def _sqlite_version_tuple() -> tuple[int, ...]:
+    return tuple(int(x) for x in sqlite3.sqlite_version.split("."))
+
+
+def ensure_sqlite_version() -> None:
+    """校验 SQLite 版本 >= 3.34，不满足则抛出带说明的 RuntimeError（启动时调用）。"""
+    if _sqlite_version_tuple() < MIN_SQLITE_VERSION:
+        raise RuntimeError(
+            f"SQLite >= 3.34 required (FTS5 trigram); found {sqlite3.sqlite_version}. "
+            "FTS5 trigram 分词需要较新的 SQLite——请升级 Python / 发行版的 sqlite3 包。"
+        )
+
+
 def init_db(conn: sqlite3.Connection | None = None) -> None:
     """建表（幂等）+ 旧库增量迁移。测试/启动时调用。"""
+    ensure_sqlite_version()
     own = conn is None
     conn = conn or connect()
     try:

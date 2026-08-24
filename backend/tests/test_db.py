@@ -1,5 +1,6 @@
 """数据层测试：建表、FTS 同步、trigram 检索（设计文档 §4）。"""
 
+import pytest
 from app import db
 
 
@@ -99,3 +100,16 @@ def test_materials_fts(conn):
 def test_journal_mode_wal(conn):
     mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode == "wal"
+
+
+def test_ensure_sqlite_version_ok(monkeypatch):
+    # 版本满足（>= 3.34）时不抛
+    monkeypatch.setattr(db, "_sqlite_version_tuple", lambda: (3, 34, 0))
+    db.ensure_sqlite_version()
+
+
+def test_ensure_sqlite_version_raises_on_too_old(monkeypatch):
+    # 版本过旧（< 3.34）时抛清晰错误（FTS5 trigram 前提）
+    monkeypatch.setattr(db, "_sqlite_version_tuple", lambda: (3, 32, 0))
+    with pytest.raises(RuntimeError, match="SQLite >= 3.34"):
+        db.ensure_sqlite_version()
