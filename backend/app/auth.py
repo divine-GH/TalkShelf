@@ -134,7 +134,7 @@ def lock_remaining_seconds(conn: sqlite3.Connection) -> int:
     last = conn.execute("SELECT MAX(attempted_at) FROM login_failures").fetchone()[0]
     try:
         last_dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return 0
     return max(0, config.LOGIN_LOCK_SECONDS - int((datetime.now() - last_dt).total_seconds()))
 
