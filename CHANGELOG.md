@@ -10,6 +10,16 @@ note-brain 的版本更新记录。格式基于 [Keep a Changelog](https://keepa
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.8.1] - 2026-08-24
+
+### Added
+
+- **贡献指南 `CONTRIBUTING.md`**：环境要求、本地开发、测试 / lint / 运行、提交与 PR 流程、代码约定。
+- **README 顶部徽章**：CI / License / Python / ruff（CI 徽章的仓库路径待填，见 README 注释）。
+- **隐私说明（数据边界）**：明确笔记主要存本地 SQLite，LLM / 搜索 / 抓取时相关文本会离开本机，
+  以及如何更保守地使用。
+- **备份指引**：WAL 模式下先 checkpoint 再复制 `data/note-brain.db`，或用 `sqlite3 .backup`。
+
 ## [0.8.0] - 2026-08-24
 
 本版本主要完成**开源发布准备**，把项目从「本机自用」打理成外部可读、可跑、可贡献的公开仓库。

@@ -22,7 +22,7 @@ load_dotenv(BASE_DIR / ".env")
 # 版本信息（语义化版本；发版流程：bump APP_VERSION → CHANGELOG.md 追加 → git tag vX.Y.Z）
 # ---------------------------------------------------------------------------
 APP_NAME = "note-brain"
-APP_VERSION = "0.8.0"  # 与最近的 vX.Y.Z tag 对应；发新版本时 bump
+APP_VERSION = "0.8.1"  # 与最近的 vX.Y.Z tag 对应；发新版本时 bump
 
 
 def _env_int(name: str, default: int) -> int:
