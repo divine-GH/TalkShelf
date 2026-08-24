@@ -3,7 +3,7 @@
 个人知识速记工具：记录零负担，整理交给 AI，查找用对话代替翻笔记。
 
 <!-- 徽章：把 CI 徽章里的 OWNER/REPO 换成你的 GitHub 仓库路径（如 divine-GH/TalkShelf） -->
-![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/divine-GH/TalkShelf/actions/workflows/ci.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
 ![Ruff](https://img.shields.io/badge/code_style-ruff-black.svg)
@@ -115,7 +115,6 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 - **备份**：直接复制 `data/talkshelf.db` 即可。因为开启了 WAL 模式，**建议备份前先做 checkpoint**，把最近变更合并进主文件再复制：
   `python -c "import sqlite3;sqlite3.connect('data/talkshelf.db').execute('PRAGMA wal_checkpoint(TRUNCATE)')"`
   （更稳的做法是用 `sqlite3 data/talkshelf.db ".backup backup.db"`。）恢复 = 覆盖回 `data/talkshelf.db`。
-- 访问：`http://127.0.0.1:8000`
 - 访问：`http://127.0.0.1:8000`
 - 想用手机/局域网访问：把 `--host` 改成 `0.0.0.0`（注意同时配置登录，见下）
 
