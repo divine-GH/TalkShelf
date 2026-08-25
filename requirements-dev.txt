@@ -2,3 +2,5 @@
 -r requirements.txt
 pytest
 ruff
+# Starlette TestClient 已迁移到 httpx2（httpx 仅回退并打弃用警告）；只装 dev，运行时用不到
+httpx2
