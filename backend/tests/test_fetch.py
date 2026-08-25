@@ -120,6 +120,34 @@ def test_strip_tracking_url_keeps_normal_url():
     assert fetch.strip_tracking_url("https://a.b/c?p=2&page=3") == "https://a.b/c?p=2&page=3"
 
 
+def test_strip_tracking_url_site_allowlist_extra_params():
+    """站点白名单（A 方案）：未知站内参数也全剥（新增埋点参数即时防漏），功能参数保留。"""
+    dirty = (
+        "https://www.bilibili.com/video/BV1xx/?buvid=X&p=1&is_story_h5=false"
+        "&from_spmid=search.search-result.0.0&some_new_param=1"
+    )
+    assert fetch.strip_tracking_url(dirty) == "https://www.bilibili.com/video/BV1xx/?p=1"
+
+
+def test_strip_tracking_url_xiaoheihe_keeps_link_id():
+    """小黑盒分享链：功能参数 link_id 保留（删了链接打不开），h_camp/h_src 追踪参数剔除。"""
+    dirty = (
+        "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share"
+        "?h_camp=link&h_src=YXBwX3NoYXJl&link_id=bd8271e46154"
+    )
+    assert fetch.strip_tracking_url(dirty) == (
+        "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=bd8271e46154"
+    )
+
+
+def test_strip_tracking_url_industry_params():
+    """业界通用追踪参数（utm_*/gclid/fbclid 等，B 方案）在未知站点同样剔除。"""
+    dirty = (
+        "https://shop.example.com/i/123?a=1&utm_source=news&utm_campaign=x&gclid=abc-123&fbclid=xyz"
+    )
+    assert fetch.strip_tracking_url(dirty) == "https://shop.example.com/i/123?a=1"
+
+
 def test_fetched_message_strips_tracking_url():
     """fetched_message 的 Fetched 头与 url 字段均使用清洗后的 URL（下游 note_materials 唯一来源）。"""
     result = fetch.FetchResult(

@@ -39,8 +39,10 @@ _URL_RE = re.compile(r"https?://[^\s<>\"'，。；：！？、（）【】《》
 
 # 分享/追踪参数黑名单（P2 快照核查）：B 站 App 分享链重定向后的长链携带 buvid（设备指纹）、
 # mid（用户标识）、share_session_id/share_source/share_*、spmid/from_spmid、unique_k、
-# timestamp、up_id、plat_id 等埋点参数；小黑盒分享链带 h_camp/h_src；各站通用 from/referer/ref。
-# 这些参数在落库/展示前剔除，避免设备指纹与用户标识被持久化到 note_materials.url 或外发。
+# timestamp、up_id、plat_id 等埋点参数；小黑盒分享链带 h_camp/h_src；各站通用 from/referer/ref；
+# 再加业界通用广告/归因/分享追踪参数（Piwik/Adblock 公开清单，P2 增强 B）：gclid/fbclid/yclid/
+# igshid/msclkid/mc_cid/mc_eid/_hsenc/_hsmi/hsCtaTracking/spm/scm 等。这些参数对页面打开无功能
+# 影响（仅归因/埋点），删除不改变 URL 语义。
 _TRACKING_PARAMS = {
     "buvid",
     "mid",
@@ -55,11 +57,43 @@ _TRACKING_PARAMS = {
     "from",
     "referer",
     "ref",
+    # 广告/归因/分享追踪（业界通用）
+    "gclid",
+    "fbclid",
+    "yclid",
+    "igshid",
+    "msclkid",
+    "dclid",
+    "gbraid",
+    "wbraid",
+    "mc_cid",
+    "mc_eid",
+    "_hsenc",
+    "_hsmi",
+    "hsCtaTracking",
+    "cmpid",
+    "s_kwcid",
+    "mkt_tok",
+    "spm",
+    "scm",
+    "vero_conv",
+    "vero_id",
+    "sc_cid",
+}
+_TRACKING_PREFIXES = ("share_", "utm_", "pk_", "mtm_")
+
+# 站点专用参数白名单（P2 增强 A）：命中站点时**只保留**列出的参数（确定性覆盖，其余全剥），
+# 比通用黑名单更强——站点新增的专用参数即使未进黑名单也不会落库；未知站点退回通用黑名单。
+# 注意：必须保留真正的功能参数（如小黑盒的 link_id——分享链接 ID，删了链接打不开）。
+_SITE_PARAM_ALLOWLIST: dict[str, set[str]] = {
+    "bilibili.com": {"p"},
+    "b23.tv": set(),  # 短链本身无参数
+    "xiaoheihe.cn": {"link_id"},
 }
 
 
 def _is_tracking_param(key: str) -> bool:
-    return key in _TRACKING_PARAMS or key.startswith("share_")
+    return key in _TRACKING_PARAMS or key.startswith(_TRACKING_PREFIXES)
 
 
 class FetchError(Exception):
@@ -181,17 +215,27 @@ def _extract(html: str, final_url: str) -> tuple[str, str | None]:
 
 
 def strip_tracking_url(url: str) -> str:
-    """剥离 URL 中的常见分享/追踪参数，保留页面路径与功能参数（如 ?p=1）。
+    """剥离 URL 中的常见分享/追踪参数，保留页面路径与功能参数（如 ?p=1、小黑盒 link_id）。
 
     P2：抓取重定向后的最终 URL 常携带 buvid/mid/share_session_id 等 App 分享追踪参数，
     若随 Fetched 头落库并展示为「来源 ↗」链接，会持久化设备指纹与用户标识。
-    仅剥离黑名单参数，不改变 URL 语义（页面路径、功能参数保留）。
+    策略（P2 增强 B+A）：已知站点走参数白名单（只保留列出的功能参数，其余全剥——确定性）；
+    未知站点走通用黑名单（覆盖业界广告/归因/分享追踪参数，零误杀）。
     """
     parts = urllib.parse.urlsplit(url)
     if not parts.query:
         return url
+    host = (parts.hostname or "").lower()
+    allow = None
+    for site, allowed in _SITE_PARAM_ALLOWLIST.items():
+        if host == site or host.endswith("." + site):
+            allow = allowed
+            break
     pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
-    kept = [(k, v) for k, v in pairs if not _is_tracking_param(k)]
+    if allow is not None:
+        kept = [(k, v) for k, v in pairs if k in allow]
+    else:
+        kept = [(k, v) for k, v in pairs if not _is_tracking_param(k)]
     if len(kept) == len(pairs):
         return url
     return urllib.parse.urlunsplit(
