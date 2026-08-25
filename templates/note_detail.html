@@ -66,8 +66,8 @@
 
   {% if note.status != 'merged' %}
   <section class="section">
-    <h2>完整编辑</h2>
-    <form id="edit-form" class="edit-form">
+    <button id="edit-toggle" class="btn edit-toggle" type="button" aria-expanded="false" aria-controls="edit-form">完整编辑</button>
+    <form id="edit-form" class="edit-form" hidden>
       <label>原文 raw（用户原话，永远可检索）
         <textarea name="raw" rows="3" required>{{ note.raw }}</textarea>
       </label>
@@ -208,6 +208,19 @@
       btn.disabled = false;
     }
   });
+
+  // 完整编辑：默认收起，点按钮展开（§8）
+  const editToggle = document.getElementById('edit-toggle');
+  const editForm = document.getElementById('edit-form');
+  if (editToggle && editForm) {
+    editToggle.addEventListener('click', function () {
+      const open = editForm.hidden;
+      editForm.hidden = !open;
+      this.textContent = open ? '收起编辑' : '完整编辑';
+      this.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) editForm.querySelector('textarea, input').focus();
+    });
+  }
 
   // 修正对话入口（context_note_id 关联本笔记，§4.3）
   document.getElementById('fix-form').addEventListener('submit', async function (e) {

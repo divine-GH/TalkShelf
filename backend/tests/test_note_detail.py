@@ -297,4 +297,11 @@ def test_detail_page_html(client, llm_ok, db_path):
     assert resp.status_code == 200
     for fragment in ("完整编辑", "修正对话", "来源对话", "重新整理", "删除"):
         assert fragment in resp.text, f"详情页缺少: {fragment}"
+    # 完整编辑默认收起：只显示入口按钮，表单带 hidden 属性（§8）
+    assert 'id="edit-toggle"' in resp.text, "缺少完整编辑入口按钮"
+    assert 'id="edit-form" class="edit-form" hidden' in resp.text, "完整编辑表单应默认收起"
+    assert "<h2>完整编辑</h2>" not in resp.text, "完整编辑不应再有独立标题"
+    # 样式表必须含 .edit-form[hidden] 覆盖（display:flex 会压过 UA 的 [hidden] 规则，曾致表单依旧展开）
+    css = client.get("/static/style.css").text
+    assert ".edit-form[hidden] { display: none; }" in css, "缺少 .edit-form[hidden] 覆盖规则"
     assert client.get("/notes/999999").status_code == 404
