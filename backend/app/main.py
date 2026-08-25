@@ -26,13 +26,20 @@ async def lifespan(app: FastAPI):
     app.state.queue = q
     q.start()
     q.scan_pending()  # 启动扫描 status='pending' 补处理（§14 第 5 条；failed 不自动重试）
-    # 对话后台整理（§32）：sync 端点经 kick() 调度任务到本事件循环（线程池线程跑 LLM/抓取）
-    app.state.conv_runner = api.ConversationRunner(asyncio.get_running_loop())
+    # 对话后台整理（§32 / §36）：sync 端点经 kick() 调度任务到本事件循环（线程池线程跑 LLM/抓取/检索）；
+    # 两个 runner 共用同一调度骨架，按 status 区分（draft=记录对话 / search=检索会话）
+    app.state.conv_runner = api.ConversationRunner(
+        asyncio.get_running_loop(), "draft", api._process_round
+    )
+    app.state.search_runner = api.ConversationRunner(
+        asyncio.get_running_loop(), "search", api._process_search_round
+    )
     logger.info("TalkShelf 启动完成，DB: %s", config.DATABASE_PATH)
     try:
         yield
     finally:
         await app.state.conv_runner.stop()
+        await app.state.search_runner.stop()
         await q.stop()
 
 

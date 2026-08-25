@@ -22,7 +22,7 @@ load_dotenv(BASE_DIR / ".env")
 # 版本信息（语义化版本；发版流程：bump APP_VERSION → CHANGELOG.md 追加 → git tag vX.Y.Z）
 # ---------------------------------------------------------------------------
 APP_NAME = "TalkShelf"
-APP_VERSION = "0.9.1"  # 与最近的 vX.Y.Z tag 对应；发新版本时 bump
+APP_VERSION = "0.10.0"  # 与最近的 vX.Y.Z tag 对应；发新版本时 bump
 
 
 def _env_int(name: str, default: int) -> int:
@@ -135,7 +135,9 @@ VECTOR_MIN_SIM = float(
     os.getenv("VECTOR_MIN_SIM", "0.4")
 )  # Top-1 向量相似度阈值（§7：低于则视为召回不足）
 MATERIALS_TOP_K = _env_int("MATERIALS_TOP_K", 5)  # 材料层兜底召回条数
-SEARCH_HISTORY_LIMIT = _env_int("SEARCH_HISTORY_LIMIT", 50)  # 检索记录存储上限（条，超出删最早）
+SEARCH_TOOL_MAX_ROUNDS = _env_int(
+    "SEARCH_TOOL_MAX_ROUNDS", 3
+)  # 检索会话单轮对话内工具循环上限（§36）
 
 # ---------------------------------------------------------------------------
 # 异步补做队列（设计文档 §5 / §14 第 5 条）

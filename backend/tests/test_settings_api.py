@@ -5,7 +5,7 @@
 - 每周总结开关：关闭后 /api/weekly 不调 LLM、纯统计文本；
 - 默认分类：直存（POST /api/notes）与拍板降级直存都打上兜底分类；重置后不启用；
 - 模型/检索参数：覆盖后 llm/embedding/search 实际读取生效值；
-- 数据管理：清空检索记录、failed 笔记列表 + 重试（复用 /api/notes/{id}/reprocess）；
+- 数据管理：failed 笔记列表 + 重试（复用 /api/notes/{id}/reprocess）；
 - 修改登录密码：旧密码校验、新密码落库后覆盖 .env 密码。
 """
 
@@ -244,7 +244,7 @@ def test_settings_models_endpoint(client, monkeypatch):
 
 
 def test_retrieval_params_override(client, llm_ok, db_path, monkeypatch):
-    """检索参数覆盖后，向量/FTS 召回的 top_k 实际使用设置值。"""
+    """检索参数覆盖后，向量/FTS 召回的 top_k 实际使用设置值（§36 检索会话自动注入路径）。"""
     resp = client.post("/api/notes", json={"raw": "nginx 上传大文件限制", "kind": "note"})
     note_id = resp.json()["note_id"]
     wait_for(lambda: _has_embedding(db_path, note_id), desc="补算 embedding")
@@ -265,8 +265,16 @@ def test_retrieval_params_override(client, llm_ok, db_path, monkeypatch):
     monkeypatch.setattr(embedding, "cosine_top_k", spy_cosine)
     monkeypatch.setattr(retrieval, "fts_search", spy_fts)
     client.put("/api/settings", json={"vector_top_k": 3, "fts_top_k": 2})
-    resp = client.post("/api/ask", json={"question": "nginx 上传"})
-    assert resp.status_code == 200
+    resp = client.post("/api/search/conversations", json={"message": "nginx 上传"})
+    assert resp.status_code == 200, resp.text
+    conv_id = resp.json()["conversation_id"]
+    wait_for(
+        lambda: any(
+            m["kind"] == "search_hits"
+            for m in client.get(f"/api/search/conversations/{conv_id}").json()["messages"]
+        ),
+        desc="检索会话自动注入完成",
+    )
     assert captured.get("vector_k") == 3, f"向量 Top-K 未生效: {captured}"
     assert captured.get("fts_k") == 2, f"FTS Top-K 未生效: {captured}"
 
@@ -274,14 +282,6 @@ def test_retrieval_params_override(client, llm_ok, db_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # 数据管理
 # ---------------------------------------------------------------------------
-
-
-def test_clear_search_history(client, llm_ok):
-    assert client.post("/api/ask", json={"question": "nginx 上传"}).status_code == 200
-    assert len(client.get("/api/search-history").json()["items"]) == 1
-    data = client.post("/api/settings/clear-search-history").json()
-    assert data["deleted"] == 1
-    assert client.get("/api/search-history").json()["items"] == []
 
 
 def test_failed_notes_list_and_retry(client, llm_ok, conn, db_path):

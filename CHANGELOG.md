@@ -10,6 +10,38 @@ TalkShelf 的版本更新记录。格式基于 [Keep a Changelog](https://keepac
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.10.0] - 2026-08-25
+
+### Added
+
+- **对话式检索（§36）**：检索页从单轮问答升级为对话式检索——多轮追问、LLM 带 `note_search`
+  工具可主动补检/重检、意图词命中时联网搜索补充（延续 §23.3 受控语义：不声明搜索工具，
+  命中「查一下/搜一下/搜索…」才触发服务端原生搜索），工具循环上限 `SEARCH_TOOL_MAX_ROUNDS`
+  （默认 3）。检索层（向量 + FTS + RRF + 材料层兜底）不变，评测集 26/26 通过。
+- **检索会话**：检索会话历史（可回看/继续/删除）取代旧的「检索记录」（`search_history`
+  表/端点/设置页「清空检索记录」入口按决策移除，`_migrate` 幂等清旧表）；会话与消息复用
+  conversations/messages 表（`status='search'` 隔离，不进记录草稿列表、不可拍板）。
+- **检索注入带原文**：注入 LLM 的检索材料从「200 字摘要」修复为「笔记正文原文」
+  （§7 设计本来就要原文；此前 sources 键名与注入函数不匹配，LLM 只看到标题）。
+
+### Changed
+
+- 后端：API 从 `POST /api/ask`（+ `/api/search-history`）迁移为检索会话五端点
+  （`/api/search/conversations` 系列）；`ConversationRunner` 泛化为按 `status` 分派
+  （记录对话 draft / 检索会话 search），`main.py` 注册两个 runner。
+- 前端：`/ask` 页改为对话式布局（消息流 + 检索材料折叠条 + 会话列表 + 「新对话」），
+  轮询沿用记录对话模式。
+- 冒烟/评测：`smoke_e2e.py` 检索链路改走检索会话并感知 `EMBEDDING_ENABLED` 开关
+  （§35 默认关时跳过向量检查，避免环境性误报）；`eval_retrieval.py` 提示开关状态。
+- 修复潜在 bug：工具循环（web_fetch / note_search）补发「带 `tool_calls` 的 assistant
+  消息」——OpenAI 协议要求 tool 消息紧跟 tool_calls（DeepSeek 严格校验，真实冒烟暴露）。
+
+### Notes
+
+- 143 个 pytest 全过；ruff check 零告警 + format 通过；真实端到端冒烟 28/28
+  （真实 DeepSeek 整理/作答 + 工具循环，本地 Ollama bge-m3 评测 26/26）。
+- 旧版检索记录数据不迁移（功能被检索会话取代）。
+
 ## [0.9.1] - 2026-08-25
 
 ### Changed

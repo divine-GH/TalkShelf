@@ -135,6 +135,10 @@ def _note_hits_to_sources(conn: sqlite3.Connection, note_ids: list[int]) -> list
                     :200
                 ],
                 "url": note.get("source_url"),
+                # §36 修复：注入 LLM 的材料需**原文**（§7「召回笔记原文」）——sources 形态
+                # 原本只有 200 字摘要且键名为 snippet，build_ask_user 按 content/raw 取不到
+                # → LLM 只看到标题（冒烟实测暴露）。text 截断到 embedding 文本上限。
+                "text": (note.get("content") or note.get("raw") or "")[:6000],
                 "from_material": False,
             }
         )

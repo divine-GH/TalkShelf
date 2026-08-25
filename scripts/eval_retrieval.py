@@ -8,7 +8,7 @@
 行为：
 1. 建临时 SQLite（backend 同级 .nb-eval-* 目录，Path.mkdir 无 0o700 坑），灌种子笔记 + 材料，
    真实 Ollama 批量算 embedding（bge-m3；Ollama 不可用时打印警告，退化为 FTS-only 评测）；
-2. 逐问跑 retrieval.retrieve（与 /api/ask 同一检索层），检查期望来源是否在 Top-N；
+2. 逐问跑 retrieval.retrieve（与检索会话同一检索层），检查期望来源是否在 Top-N；
 3. 输出每题 pass/fail + 通过率，低于阈值 exit 1（CI/提交前可挂）。
 
 注意：本脚本测的是"检索召回层"（防检索悄悄退化），不调 LLM 作答、不花钱。
@@ -116,6 +116,11 @@ def main() -> int:
 
         eval_set = json.loads(EVAL_SET_PATH.read_text(encoding="utf-8"))
         threshold = args.threshold if args.threshold is not None else eval_set["pass_threshold"]
+        if not config.EMBEDDING_ENABLED:
+            print(
+                "⚠️ EMBEDDING_ENABLED 当前为关（§35 默认），若本机已装 Ollama 请在 "
+                "EMBEDDING_ENABLED=1 环境下运行以评测向量路（否则为 FTS-only，非代码回归）。"
+            )
         return run_eval(conn, title_to_id, threshold)
     except embedding.EmbeddingError as e:
         print(f"⚠️ Ollama embedding 不可用（{e}），本次为 FTS-only 关键词评测（向量路跳过）。")

@@ -3,29 +3,30 @@
 
 {% block content %}
 <section class="ask-entry">
-  <h1>问点什么</h1>
-  <p class="hint">用对话的方式找回记过的内容。单轮问答：答案带引用来源，点击可跳转原笔记。</p>
+  <h1>检索</h1>
+  <p class="hint">对话式检索：像聊天一样找回记过的内容，答案带引用来源；可以多轮追问，
+    需要查资料时直接说「查一下…」联网补充。</p>
   <form id="ask-form" class="record-form">
     <textarea id="ask-input" rows="3" placeholder="{{ ask_placeholder }}" autofocus></textarea>
-    <button type="submit" class="btn btn-primary btn-lg">提问</button>
+    <div class="ask-actions">
+      <button type="submit" class="btn btn-primary btn-lg">提问</button>
+      <button type="button" id="ask-new" class="btn btn-lg">新对话</button>
+    </div>
   </form>
   <p id="ask-error" class="error" hidden></p>
 </section>
 
-<section class="section" id="ask-result" hidden>
-  <h2>答案</h2>
-  <div id="ask-answer" class="ask-answer"></div>
-  <p id="ask-vector-warn" class="warn" hidden>⚠️ 语义检索暂不可用（本地向量服务未运行或在设置中已关闭），当前为关键词检索。</p>
-  <p id="ask-weak-warn" class="warn" hidden>笔记库可能没有与问题直接相关的内容，答案可能不准确。</p>
-
-  <h2>引用来源</h2>
-  <ul id="ask-sources" class="note-list"></ul>
-  <ul id="ask-material-sources" class="note-list"></ul>
+<section class="section chat-page" id="ask-chat-section" hidden>
+  <div class="chat-head">
+    <button type="button" id="chat-back" class="back">← 检索会话</button>
+    <span class="chat-id" id="chat-id-label"></span>
+  </div>
+  <div id="messages" class="messages"></div>
 </section>
 
 <section class="section" id="ask-history">
-  <h2>检索记录</h2>
-  <p id="history-empty" class="hint">还没有检索记录，提问成功后会保存在这里（最多 <span id="history-limit">—</span> 条，超出自动删除最早记录）。</p>
+  <h2>检索会话</h2>
+  <p id="history-empty" class="hint">还没有检索会话，提问后会保存在这里，可回看、继续发问。</p>
   <ul id="history-list" class="note-list"></ul>
 </section>
 {% endblock %}
@@ -38,44 +39,226 @@
     return d.innerHTML;
   }
 
-  function renderAnswer(data) {
-    const result = document.getElementById('ask-result');
-    result.hidden = false;
-    document.getElementById('ask-answer').innerHTML =
-      '<p>' + esc(data.answer).replace(/\n/g, '<br>') + '</p>';
-    document.getElementById('ask-vector-warn').hidden = data.vector_ok;
-    document.getElementById('ask-weak-warn').hidden = !data.weak_recall;
+  // ---------- 状态 ----------
+  let currentConvId = null;      // null = 列表模式；数字 = 已打开某个会话
+  let chatLoaded = false;
+  let lastMsgId = 0;
+  let pendingReply = false;      // 是否存在未回复的用户消息（决定「思考中…」气泡与轮询）
+  let pollTimer = null;
+  const messagesBox = document.getElementById('messages');
 
-    const srcList = document.getElementById('ask-sources');
-    srcList.innerHTML = '';
-    (data.sources || []).forEach(function (s) {
+  function scrollBottom() { messagesBox.scrollTop = messagesBox.scrollHeight; }
+
+  function showError(msg) {
+    const el = document.getElementById('ask-error');
+    el.textContent = msg;
+    el.hidden = false;
+  }
+
+  // ---------- 消息渲染（与 chat.html 同构：材料先到、回复后到，滚动到底） ----------
+  function materialHost(content) {
+    const mm = content.match(/^Fetched (\S+)/);
+    if (!mm) return null;
+    try { return new URL(mm[1]).hostname || null; } catch (e) { return null; }
+  }
+
+  function parseHits(content) {
+    try {
+      const d = JSON.parse(content);
+      if (d && typeof d === 'object' && Array.isArray(d.sources)) return d;
+    } catch (e) { /* 非结构化（旧数据/异常）按文本展示 */ }
+    return null;
+  }
+
+  // 检索注入（search_hits）→ 折叠条 + 引用来源列表（sources 可跳笔记；材料命中标注归属）
+  function buildHitsBox(content) {
+    const det = document.createElement('details');
+    det.className = 'msg-material';
+    const hits = parseHits(content);
+    const summary = document.createElement('summary');
+    if (!hits) {
+      summary.textContent = '检索材料';
+      const pre = document.createElement('pre');
+      pre.textContent = content;
+      det.appendChild(summary);
+      det.appendChild(pre);
+      return det;
+    }
+    const n = (hits.sources || []).length + (hits.material_sources || []).length;
+    summary.textContent = '检索材料（' + n + ' 条来源）';
+    det.appendChild(summary);
+
+    const body = document.createElement('div');
+    const srcList = document.createElement('ul');
+    srcList.className = 'note-list';
+    (hits.sources || []).forEach(function (s) {
       const li = document.createElement('li');
       li.className = 'note-item';
       li.innerHTML =
         '<div class="note-head"><span class="badge">引用</span>' +
-        (s.id ? '<a class="note-title" href="/notes#note-' + s.id + '">' + esc(s.title) + '</a>' : '') +
+        (s.id ? '<a class="note-title" target="_blank" href="/notes#note-' + s.id + '">' + esc(s.title) + '</a>' : '') +
         '</div>' +
         (s.snippet ? '<div class="note-summary">' + esc(s.snippet) + '</div>' : '') +
         (s.url ? '<div class="note-meta"><a class="source-link" href="' + esc(s.url) + '" target="_blank" rel="noopener">来源 ↗</a></div>' : '');
       srcList.appendChild(li);
     });
-
-    const matList = document.getElementById('ask-material-sources');
-    matList.innerHTML = '';
-    (data.material_sources || []).forEach(function (m) {
+    (hits.material_sources || []).forEach(function (m) {
       const li = document.createElement('li');
       li.className = 'note-item';
       const label = m.kind === 'fetched_page' ? '抓取正文' : '搜索结果';
       li.innerHTML =
-        '<div class="note-head"><span class="badge badge-warn">命中于来源材料（' + label + '）</span>' +
-        '<span class="note-title">归属笔记 #' + m.note_id + '</span></div>' +
+        '<div class="note-head"><span class="badge badge-warn">命中于来源材料（' + esc(label) + '）</span>' +
+        '<a class="note-title" target="_blank" href="/notes#note-' + m.note_id + '">归属笔记 #' + m.note_id + '</a></div>' +
         (m.snippet ? '<div class="note-summary">' + esc(m.snippet) + '</div>' : '') +
         (m.url ? '<div class="note-meta"><a class="source-link" href="' + esc(m.url) + '" target="_blank" rel="noopener">来源 ↗</a></div>' : '');
-      matList.appendChild(li);
+      srcList.appendChild(li);
     });
-    result.scrollIntoView({behavior: 'smooth'});
+    body.appendChild(srcList);
+    if (hits.weak_recall) {
+      const w = document.createElement('p');
+      w.className = 'warn';
+      w.textContent = '⚠️ 召回相似度偏低，笔记库可能没有直接相关的内容，答案可能不准确。';
+      body.appendChild(w);
+    }
+    if (!hits.vector_ok && hits.sources && hits.sources.length) {
+      const v = document.createElement('p');
+      v.className = 'warn';
+      v.textContent = '⚠️ 语义检索暂不可用（本地向量服务未运行或在设置中已关闭），当前为关键词检索。';
+      body.appendChild(v);
+    }
+    det.appendChild(body);
+    return det;
   }
 
+  function buildFetchedBox(content) {
+    const det = document.createElement('details');
+    det.className = 'msg-material';
+    const sm = document.createElement('summary');
+    const host = materialHost(content);
+    sm.textContent = '抓取的网页正文' + (host ? ' · ' + host : '');
+    const pre = document.createElement('pre');
+    pre.textContent = content;
+    det.appendChild(sm);
+    det.appendChild(pre);
+    return det;
+  }
+
+  function buildSearchResultBox(content) {
+    const det = document.createElement('details');
+    det.className = 'msg-material';
+    const sm = document.createElement('summary');
+    sm.textContent = '联网搜索结果';
+    const pre = document.createElement('pre');
+    pre.textContent = content;
+    det.appendChild(sm);
+    det.appendChild(pre);
+    return det;
+  }
+
+  function appendMsg(role, kind, content) {
+    const div = document.createElement('div');
+    div.className = 'msg msg-' + role + ' msg-kind-' + kind;
+    if (kind === 'search_hits') {
+      div.appendChild(buildHitsBox(content));
+    } else if (kind === 'search_result') {
+      div.appendChild(buildSearchResultBox(content));
+    } else if (kind === 'fetched_page') {
+      div.appendChild(buildFetchedBox(content));
+    } else {
+      const box = document.createElement('div');
+      box.className = 'msg-text';
+      box.textContent = content;
+      div.appendChild(box);
+    }
+    // 材料先到、回复后到（§32 同语义）：新消息插到「思考中」气泡之前，气泡保持最后一位
+    const thinkEl = messagesBox.querySelector('.msg-thinking');
+    if (thinkEl) messagesBox.insertBefore(div, thinkEl);
+    else messagesBox.appendChild(div);
+    scrollBottom();
+  }
+
+  function makeThinking() {
+    if (messagesBox.querySelector('.msg-thinking')) return;
+    const div = document.createElement('div');
+    div.className = 'msg msg-assistant msg-thinking';
+    const box = document.createElement('div');
+    box.className = 'msg-text';
+    box.textContent = '思考中…';
+    div.appendChild(box);
+    messagesBox.appendChild(div);
+    scrollBottom();
+  }
+
+  function removeThinking() {
+    const el = messagesBox.querySelector('.msg-thinking');
+    if (el) el.remove();
+  }
+
+  // ---------- 会话打开 / 渲染 ----------
+  function openChatFor(convId) {
+    currentConvId = convId;
+    chatLoaded = true;
+    lastMsgId = 0;
+    document.getElementById('ask-chat-section').hidden = false;
+    document.getElementById('ask-history').hidden = true;
+    document.getElementById('chat-id-label').textContent = '会话 #' + convId;
+    messagesBox.innerHTML = '';
+    scrollBottom();
+  }
+
+  function backToList() {
+    currentConvId = null;
+    chatLoaded = false;
+    stopPolling();
+    removeThinking();
+    document.getElementById('ask-chat-section').hidden = true;
+    document.getElementById('ask-history').hidden = false;
+    loadHistory();
+  }
+
+  function renderMessages(data) {
+    if (currentConvId !== data.id) return; // 已切换会话，丢弃过期渲染
+    let last = null;
+    data.messages.forEach(function (m) {
+      if (m.id <= lastMsgId) return;
+      lastMsgId = m.id;
+      appendMsg(m.role, m.kind, m.content);
+      last = m;
+    });
+    // 待回复判定：存在 user 文本消息晚于最后一条 assistant 文本回复
+    const texts = data.messages.filter(m => m.role === 'assistant' && m.kind === 'text');
+    const lastReply = texts[texts.length - 1];
+    pendingReply = data.messages.some(
+      m => m.role === 'user' && m.kind === 'text' && (!lastReply || m.id > lastReply.id)
+    );
+    if (pendingReply) makeThinking();
+    else removeThinking();
+  }
+
+  function stopPolling() {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  }
+
+  async function pollReply() {
+    if (currentConvId === null) return;
+    try {
+      const resp = await fetch('/api/search/conversations/' + currentConvId);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      renderMessages(data);
+      if (pendingReply) {
+        makeThinking();
+        pollTimer = setTimeout(pollReply, 1500);
+      } else {
+        stopPolling();
+      }
+    } catch (ex) {
+      stopPolling();
+      showError('获取回复失败：' + ex.message);
+    }
+  }
+
+  // ---------- 历史会话列表 ----------
   function renderHistory(items) {
     const list = document.getElementById('history-list');
     const empty = document.getElementById('history-empty');
@@ -84,44 +267,22 @@
     items.forEach(function (h) {
       const li = document.createElement('li');
       li.className = 'note-item';
-      const time = (h.created_at || '').slice(0, 16);
-      let answerHtml = '';
-      if (h.answer) {
-        const short = h.answer.length > 160 ? h.answer.slice(0, 160) + '…' : h.answer;
-        answerHtml = '<div class="note-summary">' + esc(short) + '</div>';
-      }
-      const fullAnswer = h.answer
-        ? '<div class="history-answer">' + esc(h.answer).replace(/\n/g, '<br>') + '</div>'
-        : '<div class="hint">这条记录没有保存答案。</div>';
+      const time = (h.updated_at || h.created_at || '').slice(0, 16);
       li.innerHTML =
         '<div class="note-head">' +
-        '<button type="button" class="history-question" title="查看详情">' + esc(h.question) + '</button>' +
+        '<a class="note-title history-open" href="#" data-id="' + h.id + '">' + esc(h.preview || '（无内容）') + '</a>' +
         '<button type="button" class="btn btn-small btn-danger" data-del="' + h.id + '">删除</button>' +
         '</div>' +
-        '<div class="note-meta">' + esc(time) + ' · 点击查看完整问答</div>' +
-        answerHtml +
-        '<div class="history-detail" hidden>' +
-        fullAnswer +
-        '<button type="button" class="btn btn-small history-reask">再次提问</button>' +
-        '</div>';
+        '<div class="note-meta">' + esc(time) + ' · ' + esc(h.message_count) + ' 条消息</div>';
       list.appendChild(li);
-      // 「再次提问」：把问题填回输入框并发起提问（标题点击只负责展开详情）
-      li.querySelector('.history-reask').addEventListener('click', function () {
-        const input = document.getElementById('ask-input');
-        input.value = h.question;
-        input.focus();
-        document.getElementById('ask-form').requestSubmit();
-      });
     });
   }
 
   async function loadHistory() {
     try {
-      const resp = await fetch('/api/search-history');
+      const resp = await fetch('/api/search/conversations');
       if (!resp.ok) return;
       const data = await resp.json();
-      const limitEl = document.getElementById('history-limit');
-      if (limitEl && data.limit) limitEl.textContent = data.limit;
       renderHistory(data.items || []);
     } catch (ex) {
       // 历史加载失败不影响提问主流程（静默）
@@ -131,9 +292,9 @@
   document.getElementById('history-list').addEventListener('click', async function (e) {
     const del = e.target.closest('[data-del]');
     if (del) {
-      if (!confirm('删除这条检索记录？')) return;
+      if (!confirm('删除这个检索会话？对话内容将随之删除。')) return;
       try {
-        const resp = await fetch('/api/search-history/' + del.dataset.del, {method: 'DELETE'});
+        const resp = await fetch('/api/search/conversations/' + del.dataset.del, {method: 'DELETE'});
         if (!resp.ok) {
           const data = await resp.json().catch(function () { return {}; });
           throw new Error(data.detail || ('HTTP ' + resp.status));
@@ -144,45 +305,77 @@
       }
       return;
     }
-    const ask = e.target.closest('.history-question');
-    if (ask) {
-      const li = ask.closest('li');
-      const detail = li.querySelector('.history-detail');
-      if (detail) {
-        detail.hidden = !detail.hidden;  // 就地展开/收起完整问答
-        li.classList.toggle('open', !detail.hidden);
+    const open = e.target.closest('.history-open');
+    if (open) {
+      e.preventDefault();
+      const id = Number(open.dataset.id);
+      try {
+        const resp = await fetch('/api/search/conversations/' + id);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        openChatFor(id);
+        renderMessages(data);
+        if (pendingReply) pollReply();
+      } catch (ex) {
+        showError('打开会话失败：' + ex.message);
       }
     }
   });
 
+  // ---------- 提问 / 追问 ----------
   document.getElementById('ask-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     const input = document.getElementById('ask-input');
-    const err = document.getElementById('ask-error');
-    const q = input.value.trim();
-    if (!q) return;
-    err.hidden = true;
-    const btn = this.querySelector('button');
+    const btn = this.querySelector('button[type=submit]');
+    const msg = input.value.trim();
+    if (!msg) return;
+    showErrorHide();
     btn.disabled = true;
     btn.textContent = '思考中…';
     try {
-      const resp = await fetch('/api/ask', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({question: q}),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
-      renderAnswer(data);
-      loadHistory();
+      if (currentConvId === null) {
+        const resp = await fetch('/api/search/conversations', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: msg}),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+        openChatFor(data.conversation_id);
+        appendMsg('user', 'text', msg);
+        makeThinking();
+        input.value = '';
+        loadHistory().then(function () { /* 列表在后台刷新，返回列表时可见 */ });
+        pollReply();
+      } else {
+        const resp = await fetch('/api/search/conversations/' + currentConvId + '/messages', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: msg}),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+        appendMsg('user', 'text', msg);
+        makeThinking();
+        input.value = '';
+        stopPolling();
+        pollReply();
+      }
     } catch (ex) {
-      err.textContent = '提问失败：' + ex.message;
-      err.hidden = false;
+      showError('提问失败：' + ex.message);
     } finally {
       btn.disabled = false;
       btn.textContent = '提问';
+      input.focus();
     }
   });
+
+  function showErrorHide() {
+    document.getElementById('ask-error').hidden = true;
+  }
+
+  document.getElementById('ask-new').addEventListener('click', backToList);
+  document.getElementById('chat-back').addEventListener('click', backToList);
 
   loadHistory();
 </script>

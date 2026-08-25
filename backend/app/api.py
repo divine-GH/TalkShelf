@@ -2,7 +2,7 @@
 
 M1 端点：conversations 六件套、POST /api/notes（快捷直存）、GET /api/notes（列表检索）；
 页面：首页（记录对话入口 + 最近笔记 + 草稿）、聊天页、笔记列表页。
-M2+ 再补：/api/ask、/api/review、/api/notes/{id}（详情/PUT/DELETE）、/api/stats、export/import、登录。
+M2+ 再补：检索会话（§36，原 /api/ask 单轮问答已升级）、/api/review、/api/notes/{id}（详情/PUT/DELETE）、/api/stats、export/import、登录。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import sqlite3
+from collections.abc import Callable
 from typing import Annotated
 from urllib.parse import quote, urlparse
 
@@ -180,16 +181,25 @@ def _decorate_messages(msgs: list[sqlite3.Row | dict]) -> list[dict]:
 
 
 class ConversationRunner:
-    """对话后台整理调度器：sync 端点（线程池线程）→ 事件循环任务。
+    """对话后台整理调度器（§32）：sync 端点（线程池线程）→ 事件循环任务。
 
     - kick() 线程安全（GIL 集合操作 + call_soon_threadsafe），同一对话同时只跑一个任务；
     - _run 逐轮处理：一轮 = 回复「最近一条 assistant 文本回复之后」的全部用户消息，
       用户连发多条时自动续轮，直到没有待回复消息（§32）；
     - 与异步补做队列（queue.ReprocessQueue）同生命周期：uvicorn 必须单 worker（进程内任务）。
+    - status/processor 参数化（§36）：记录对话（status='draft'，processor=_process_round）
+      与检索会话（status='search'，processor=_process_search_round）共用同一调度骨架。
     """
 
-    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        status: str,
+        processor: Callable[[int], None],
+    ) -> None:
         self.loop = loop
+        self.status = status
+        self.processor = processor
         self._active: set[int] = set()  # 正在处理/已排队调度的对话 id
         self._jobs: set[asyncio.Task] = set()
 
@@ -201,17 +211,17 @@ class ConversationRunner:
         self.loop.call_soon_threadsafe(self._spawn, conv_id)
 
     def _spawn(self, conv_id: int) -> None:
-        job = asyncio.create_task(self._run(conv_id), name=f"conv-{conv_id}")
+        job = asyncio.create_task(self._run(conv_id), name=f"{self.status}-{conv_id}")
         self._jobs.add(job)
         job.add_done_callback(self._jobs.discard)
 
     async def _run(self, conv_id: int) -> None:
         try:
-            while _has_pending_round(conv_id):
+            while _has_pending_round(conv_id, self.status):
                 try:
-                    await asyncio.to_thread(_process_round, conv_id)
-                except Exception as e:  # noqa: BLE001 —— 单轮失败记日志后停止（LLM/抓取/搜索失败已在轮内降级）
-                    logger.error("对话 #%s 后台整理失败，停止本对话任务: %s", conv_id, e)
+                    await asyncio.to_thread(self.processor, conv_id)
+                except Exception:
+                    logger.exception("对话 #%s 后台整理失败，停止本对话任务", conv_id)
                     break
         finally:
             self._active.discard(conv_id)
@@ -227,12 +237,13 @@ class ConversationRunner:
                 pass
 
 
-def _has_pending_round(conv_id: int) -> bool:
-    """是否有待处理的对话轮次：draft 且存在「最近一条 assistant 文本回复之后」的用户消息。"""
+def _has_pending_round(conv_id: int, status: str) -> bool:
+    """是否有待处理的对谈话轮：指定状态（draft=记录对话 / search=检索会话）且存在
+    「最近一条 assistant 文本回复之后」的用户消息。"""
     conn = db.connect()
     try:
         conv = conn.execute("SELECT status FROM conversations WHERE id = ?", (conv_id,)).fetchone()
-        if not conv or conv["status"] != "draft":
+        if not conv or conv["status"] != status:
             return False
         row = conn.execute(
             """SELECT EXISTS(
@@ -334,6 +345,102 @@ def _process_round(conv_id: int) -> None:
             conn.execute(
                 "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'fetched_page', ?)",
                 (conv_id, m["content"]),
+            )
+        conn.execute(
+            "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'text', ?)",
+            (conv_id, reply["text"]),
+        )
+        conn.execute(
+            "UPDATE conversations SET updated_at = datetime('now','localtime') WHERE id = ?",
+            (conv_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _process_search_round(conv_id: int) -> None:
+    """后台处理一轮检索会话（§36）：自动检索注入 → 意图词联网搜索 → LLM 带工具回复 → 落消息。
+
+    一轮 = 回复「最近一条 assistant 文本回复之后」的全部用户消息；已删除的会话直接返回
+    （与删除端点的竞态由 status='search' 检查兜住）。LLM/抓取/搜索失败均降级不阻塞。
+    """
+    conn = db.connect()
+    try:
+        conv = conn.execute(
+            "SELECT * FROM conversations WHERE id = ? AND status = 'search'", (conv_id,)
+        ).fetchone()
+        if not conv:
+            return  # 已删除/类型不符（记录对话走 _process_round）
+        last_reply_id = (
+            conn.execute(
+                "SELECT MAX(id) AS mid FROM messages WHERE conversation_id=? AND role='assistant' AND kind='text'",
+                (conv_id,),
+            ).fetchone()["mid"]
+            or 0
+        )
+        pending = conn.execute(
+            "SELECT * FROM messages WHERE conversation_id=? AND role='user' AND kind='text' AND id > ? ORDER BY id",
+            (conv_id, last_reply_id),
+        ).fetchall()
+        if not pending:
+            return
+        query = pending[-1]["content"]  # 最新用户消息作为本轮检索问题（追问天然继承上下文）
+
+        # 1. 自动检索注入（§36 首轮自动 / 每轮都注入最新问题的检索结果；直接喂 LLM 有依据）
+        result = retrieval.retrieve(conn, query)
+        hits = {
+            "query": query,
+            "sources": result["notes"],
+            "material_sources": result["materials"],
+            "vector_ok": result["vector_ok"],
+            "weak_recall": result["weak_recall"],
+        }
+        conn.execute(
+            "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'search_hits', ?)",
+            (conv_id, json.dumps(hits, ensure_ascii=False)),
+        )
+        conn.commit()  # 材料先到、回复后到（与前轮轮询可见性一致，§32 同语义）
+
+        # 2. 联网搜索（§23.3 受控语义：意图词命中才搜；失败降级不阻塞，对话照常）
+        searched = False
+        if web_search.should_search(query):
+            try:
+                items = web_search.search(query)
+                conn.execute(
+                    "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'search_result', ?)",
+                    (conv_id, web_search.results_to_material(items)),
+                )
+                conn.commit()
+                searched = True
+            except web_search.SearchError as e:
+                logger.warning("检索对话搜索失败（降级，不阻塞）: %s", e)
+
+        # 3. LLM 带工具回复：note_search 始终声明（LLM 可主动补检/重检）；
+        #    有搜索结果时追加 web_fetch（LLM 可跟进抓全文，§22.3）
+        tools = [llm.SEARCH_NOTE_TOOL]
+        if searched:
+            tools.append(llm.WEB_FETCH_TOOL)
+        try:
+            reply = llm.search_chat([dict(m) for m in _conv_messages(conn, conv_id)], tools=tools)
+        except llm.LLMError as e:
+            logger.warning("检索会话 LLM 不可用: %s", e)
+            conn.execute(
+                "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'text', ?)",
+                (conv_id, f"（检索服务暂不可用，请稍后重试：{e}）"),
+            )
+            conn.execute(
+                "UPDATE conversations SET updated_at = datetime('now','localtime') WHERE id = ?",
+                (conv_id,),
+            )
+            conn.commit()
+            return
+
+        # 4. 工具执行记录落库（追溯：检索/抓取与 LLM 已见的文本一致）
+        for ev in reply.get("tool_events", []):
+            conn.execute(
+                "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', ?, ?)",
+                (conv_id, ev["kind"], ev["content"]),
             )
         conn.execute(
             "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'text', ?)",
@@ -512,6 +619,117 @@ def get_conversation(conv_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
         "created_at": conv["created_at"],
         "messages": msgs,
     }
+
+
+# ---------------------------------------------------------------------------
+# 检索会话端点（§36：对话式检索——多轮追问 + note_search/web_fetch 工具；
+# 复用 conversations/messages 表，status='search' 隔离；替换旧 /api/ask 单轮问答）
+# ---------------------------------------------------------------------------
+
+
+def _fetch_search_conversation(conn: sqlite3.Connection, conv_id: int) -> sqlite3.Row:
+    conv = conn.execute(
+        "SELECT * FROM conversations WHERE id = ? AND status = 'search'", (conv_id,)
+    ).fetchone()
+    if not conv:
+        raise HTTPException(status_code=404, detail="检索会话不存在")
+    return conv
+
+
+@router.post("/api/search/conversations")
+def create_search_conversation(
+    body: dict, conn: ConnDep, request: Request, _auth: ApiAuthDep
+) -> dict:
+    """发起检索会话（§36）：首条用户消息立即落库并返回，检索回复后台异步生成。
+
+    首轮自动检索注入 + LLM 带 note_search 工具作答；页面轮询 GET 详情直到回复到达。
+    """
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="message 不能为空")
+    cur = conn.execute(
+        "INSERT INTO conversations(status, updated_at) VALUES ('search', datetime('now','localtime'))"
+    )
+    conv_id = cur.lastrowid
+    conn.execute(
+        "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'user', 'text', ?)",
+        (conv_id, message),
+    )
+    conn.commit()
+    request.app.state.search_runner.kick(conv_id)
+    return {"conversation_id": conv_id}
+
+
+@router.post("/api/search/conversations/{conv_id}/messages")
+def add_search_message(
+    conv_id: int, body: dict, conn: ConnDep, request: Request, _auth: ApiAuthDep
+) -> dict:
+    """追加一条检索追问（§36）：立即返回，回复后台异步生成（连发消息自动续轮）。"""
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="message 不能为空")
+    _fetch_search_conversation(conn, conv_id)
+    conn.execute(
+        "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'user', 'text', ?)",
+        (conv_id, message),
+    )
+    conn.execute(
+        "UPDATE conversations SET updated_at = datetime('now','localtime') WHERE id = ?", (conv_id,)
+    )
+    conn.commit()
+    request.app.state.search_runner.kick(conv_id)
+    return {"conversation_id": conv_id}
+
+
+@router.get("/api/search/conversations")
+def list_search_conversations(conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    """检索会话列表（新→旧；preview = 首条用户提问）。"""
+    rows = conn.execute(
+        """SELECT c.id, c.created_at, c.updated_at,
+                  (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
+                  (SELECT content FROM messages m WHERE m.conversation_id = c.id
+                    AND m.role='user' AND m.kind='text' ORDER BY m.id ASC LIMIT 1) AS first_question
+           FROM conversations c
+           WHERE c.status = 'search'
+           ORDER BY c.updated_at DESC, c.id DESC"""
+    ).fetchall()
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["preview"] = (d.pop("first_question") or "")[:60]
+        items.append(d)
+    return {"items": items}
+
+
+@router.get("/api/search/conversations/{conv_id}")
+def get_search_conversation(conv_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
+    conv = _fetch_search_conversation(conn, conv_id)
+    msgs = [
+        {
+            "id": m["id"],
+            "role": m["role"],
+            "kind": m["kind"],
+            "content": m["content"],
+            "created_at": m["created_at"],
+        }
+        for m in _conv_messages(conn, conv_id)
+    ]
+    return {
+        "id": conv["id"],
+        "status": conv["status"],
+        "created_at": conv["created_at"],
+        "updated_at": conv["updated_at"],
+        "messages": msgs,
+    }
+
+
+@router.delete("/api/search/conversations/{conv_id}")
+def delete_search_conversation(conv_id: int, conn: ConnDep, _auth: ApiAuthDep) -> Response:
+    _fetch_search_conversation(conn, conv_id)
+    conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+    conn.commit()
+    # 204 禁止带 body（JSONResponse(204, content=None) 会发 4 字节 "null"，h11 报错）
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -971,56 +1189,6 @@ def weekly_summary_api(conn: ConnDep, _auth: ApiAuthDep) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 问答端点（设计文档 §7：单轮无状态；向量+FTS+RRF+材料层兜底 + LLM 作答带引用）
-# ---------------------------------------------------------------------------
-
-
-@router.post("/api/ask")
-def ask_question(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
-    question = (body.get("question") or "").strip()
-    if not question:
-        raise HTTPException(status_code=422, detail="question 不能为空")
-    result = retrieval.retrieve(conn, question)
-    try:
-        answer = llm.answer_question(
-            question, result["notes"], result["materials"], result["weak_recall"]
-        )
-    except llm.LLMError as e:
-        logger.warning("问答生成失败: %s", e)
-        raise HTTPException(status_code=502, detail=f"问答服务不可用: {e}") from e
-    db.add_search_history(conn, question, answer)  # 检索记录：成功才落，上限裁剪在 db 层（§27）
-    conn.commit()
-    return {
-        "question": question,
-        "answer": answer,
-        "sources": result["notes"],
-        "material_sources": result["materials"],
-        "vector_ok": result["vector_ok"],
-        "weak_recall": result["weak_recall"],
-    }
-
-
-# ---------------------------------------------------------------------------
-# 检索记录（检索页历史：/api/ask 成功自动落一条；SEARCH_HISTORY_LIMIT 上限裁剪；单条删除）
-# ---------------------------------------------------------------------------
-
-
-@router.get("/api/search-history")
-def search_history_list(conn: ConnDep, _auth: ApiAuthDep) -> dict:
-    """检索记录列表（新→旧，最多 SEARCH_HISTORY_LIMIT 条）。"""
-    return {"items": db.list_search_history(conn), "limit": config.SEARCH_HISTORY_LIMIT}
-
-
-@router.delete("/api/search-history/{record_id}")
-def search_history_delete(record_id: int, conn: ConnDep, _auth: ApiAuthDep) -> Response:
-    """删除单条检索记录（不存在返回 404）。"""
-    if not db.delete_search_history(conn, record_id):
-        raise HTTPException(status_code=404, detail="检索记录不存在")
-    conn.commit()
-    return Response(status_code=204)
-
-
-# ---------------------------------------------------------------------------
 # 设置端点（设计文档 §28：settings 表键值覆盖 .env 默认值，改完立即生效、重启不丢）
 # ---------------------------------------------------------------------------
 
@@ -1103,14 +1271,6 @@ def put_settings(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
         )
     conn.commit()
     return _settings_payload(conn)
-
-
-@router.post("/api/settings/clear-search-history")
-def clear_search_history(conn: ConnDep, _auth: ApiAuthDep) -> dict:
-    """清空检索记录（数据管理）。返回删除条数。"""
-    cur = conn.execute("DELETE FROM search_history")
-    conn.commit()
-    return {"deleted": cur.rowcount}
 
 
 @router.get("/api/settings/models")

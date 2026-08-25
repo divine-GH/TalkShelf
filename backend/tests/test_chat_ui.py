@@ -7,6 +7,12 @@ from app import fetch, llm
 from conftest import conv_last_message, wait_for
 
 
+def _reply_arrived(client, conv_id) -> bool:
+    """LLM 回复落库（user 消息的 kind 也是 'text'，谓词必须同时看 role，防竞态误判）。"""
+    m = conv_last_message(client, conv_id)
+    return m.get("role") == "assistant" and m.get("kind") == "text"
+
+
 def test_chat_ui_fixes(client, llm_ok, monkeypatch):
     """抓取材料 + 整理 JSON 回复落库后，聊天页渲染：无外层 msg-text、材料折叠、预览卡。"""
     from app import fetch as fetch_mod
@@ -25,7 +31,7 @@ def test_chat_ui_fixes(client, llm_ok, monkeypatch):
         "/api/conversations", json={"message": "看这个链接 https://example.com/a 挺有用"}
     ).json()["conversation_id"]
     wait_for(
-        lambda: conv_last_message(client, conv_id).get("kind") == "text",
+        lambda: _reply_arrived(client, conv_id),
         desc="LLM 回复落库",
         # 默认 3s 太紧：机器负载高（本机同时跑 uvicorn 等）时后台异步任务偶发 >3s 才排上线程
         # （全 mock 路径实测调度到执行约 0.1s，2026-08-25 偶发 4/5 失败，与业务改动无关）
@@ -77,7 +83,7 @@ def test_material_visible_before_reply(client, llm_ok, monkeypatch):
     wait_for(material_arrived, desc="材料先可见")
     msgs = client.get(f"/api/conversations/{conv_id}").json()["messages"]
     assert msgs[-1]["kind"] == "fetched_page", "回复未到时最后一条是材料"
-    wait_for(lambda: conv_last_message(client, conv_id).get("kind") == "text", desc="LLM 回复后到")
+    wait_for(lambda: _reply_arrived(client, conv_id), desc="LLM 回复后到")
     kinds = [
         m["kind"]
         for m in client.get(f"/api/conversations/{conv_id}").json()["messages"]

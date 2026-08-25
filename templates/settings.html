@@ -152,10 +152,6 @@
   <h2>数据管理</h2>
   <div class="note-item">
     <div class="set-row">
-      <span class="set-label">清空检索记录<span class="set-hint">删除 /ask 页面保存的全部历史提问</span></span>
-      <button type="button" id="clear-history-btn" class="btn btn-danger btn-small">清空</button>
-    </div>
-    <div class="set-row">
       <span class="set-label">补处理失败的笔记<span class="set-hint">重新整理失败的笔记（status=failed），可重试</span></span>
       <span id="failed-count" class="hint"></span>
     </div>
@@ -465,19 +461,6 @@
       showMsg('设置已保存。');
     } catch (ex) {
       showMsg('保存失败：' + ex.message, true);
-    }
-  });
-
-  // 清空检索记录
-  document.getElementById('clear-history-btn').addEventListener('click', async function () {
-    if (!confirm('确定清空全部检索记录？此操作不可恢复。')) return;
-    try {
-      var resp = await fetch('/api/settings/clear-search-history', {method: 'POST'});
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      var data = await resp.json();
-      showMsg('已清空 ' + data.deleted + ' 条检索记录。');
-    } catch (ex) {
-      showMsg('清空失败：' + ex.message, true);
     }
   });
 

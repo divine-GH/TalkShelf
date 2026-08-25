@@ -1,13 +1,14 @@
 """TalkShelf M2 端到端真实冒烟（真实 DeepSeek + 真实 Ollama，花几分钱）。
 
 验证链路：对话式记录（真实整理 JSON）→ 拍板落库 → 队列补做（真实 embedding + 向量查重）
-→ /api/ask 真实检索 + 真实作答。用临时库（DATABASE_PATH 覆盖），不碰真实数据。
+→ 检索会话（§36：对话式检索，真实检索注入 + 真实作答）。用临时库（DATABASE_PATH 覆盖），不碰真实数据。
 
 用法（仓库根目录）：
     & '.venv\\Scripts\\python.exe' scripts/smoke_e2e.py
 退出码：0 全部通过；非 0 冒烟失败。
 """
 
+import json
 import os
 import sys
 import time
@@ -98,7 +99,10 @@ def main() -> int:
         )
 
         # 3. 队列补做：真实 embedding（bge-m3）+ 向量查重（真实 DeepSeek）
+        # （§35 起 EMBEDDING_ENABLED 默认关：未开启时跳过向量检查，避免环境性误报）
+        emb_enabled = config.EMBEDDING_ENABLED
         deadline = time.time() + 120
+        has_emb = False
         while time.time() < deadline:
             conn = db.connect()
             try:
@@ -113,19 +117,54 @@ def main() -> int:
                 ).fetchone()[0]
             finally:
                 conn.close()
-            if has_emb and status in ("processed", "duplicate"):
+            if (emb_enabled and has_emb) or status in ("processed", "duplicate"):
                 break
             time.sleep(1)
-        check("队列补做 embedding（真实 Ollama bge-m3）", has_emb)
+        if emb_enabled:
+            check("队列补做 embedding（真实 Ollama bge-m3）", has_emb)
+        else:
+            check("队列补做 embedding（EMBEDDING_ENABLED=0，跳过）", True)
         check("笔记状态", status in ("processed", "duplicate"), f"status={status}")
 
-        # 4. 问答：真实检索（向量 + FTS + RRF）+ 真实作答
-        resp = client.post("/api/ask", json={"question": "上传大文件报 413 是什么原因？"})
-        check("问答 200", resp.status_code == 200, resp.text[:200])
-        ask = resp.json()
-        check("向量检索可用", ask.get("vector_ok") is True)
-        check("召回来源非空", bool(ask.get("sources")), f"sources={ask['sources']}")
-        check("答案含引用/内容", len(ask.get("answer") or "") > 20, ask.get("answer", "")[:80])
+        # 4. 对话式检索（§36）：创建检索会话 → 自动检索注入 → 真实 LLM 带工具作答
+        resp = client.post(
+            "/api/search/conversations",
+            json={"message": "上传大文件报 413 是什么原因？"},
+        )
+        check("创建检索会话 200", resp.status_code == 200, resp.text[:200])
+        sconv_id = resp.json()["conversation_id"]
+        deadline = time.time() + 120
+        sreply = None
+        shits = None
+        while time.time() < deadline:
+            msgs = client.get(f"/api/search/conversations/{sconv_id}").json()["messages"]
+            has_hits = any(m["kind"] == "search_hits" for m in msgs)
+            last = msgs[-1] if msgs else {}
+            if has_hits and last.get("role") == "assistant" and last.get("kind") == "text":
+                sreply = last["content"]
+                shits = next(
+                    json.loads(m["content"])
+                    for m in msgs
+                    if m["kind"] == "search_hits"
+                )
+                break
+            time.sleep(1)
+        check("检索会话自动注入完成", shits is not None, f"hits={str(shits)[:80]!r}")
+        if emb_enabled:
+            check("向量检索可用", bool(shits) and shits.get("vector_ok") is True)
+        else:
+            check("向量检索可用（EMBEDDING_ENABLED=0，跳过）", bool(shits))
+        check("召回来源非空", bool(shits) and bool(shits.get("sources")), f"sources={shits.get('sources') if shits else None}")
+        check("检索回复非空", sreply is not None and len(sreply) > 20, str(sreply)[:80])
+
+        # 4b. 检索会话历史列表（§36）
+        resp = client.get("/api/search/conversations")
+        check(
+            "检索会话列表含新会话",
+            resp.status_code == 200
+            and any(i["id"] == sconv_id for i in resp.json().get("items", [])),
+            resp.text[:120],
+        )
 
         # 5. 回顾页：把这条 note 转成 interest 再走一遍分区（快速验证）
         # （兴趣条目另造一条，验证 review API）
@@ -146,24 +185,27 @@ def main() -> int:
         resp = client.get(f"/notes/{note_id}")
         check("详情页 HTML 200", resp.status_code == 200, resp.text[:60].replace("\n", " "))
 
-        # 7. M3 完整编辑（PUT）：改标题 → 真实 Ollama 重算向量
+        # 7. M3 完整编辑（PUT）：改标题 → 真实 Ollama 重算向量（开关关闭时跳过）
         resp = client.put(f"/api/notes/{note_id}", json={"title": "冒烟改过的标题"})
         check("PUT 编辑 200", resp.status_code == 200, resp.text[:200])
-        deadline = time.time() + 120
-        vec_changed = False
-        while time.time() < deadline:
-            conn = db.connect()
-            try:
-                vec = conn.execute(
-                    "SELECT vector FROM embeddings WHERE note_id = ?", (note_id,)
-                ).fetchone()
-            finally:
-                conn.close()
-            if vec is not None:
-                vec_changed = True
-                break
-            time.sleep(1)
-        check("编辑后向量重算（真实 Ollama）", vec_changed)
+        if emb_enabled:
+            deadline = time.time() + 120
+            vec_changed = False
+            while time.time() < deadline:
+                conn = db.connect()
+                try:
+                    vec = conn.execute(
+                        "SELECT vector FROM embeddings WHERE note_id = ?", (note_id,)
+                    ).fetchone()
+                finally:
+                    conn.close()
+                if vec is not None:
+                    vec_changed = True
+                    break
+                time.sleep(1)
+            check("编辑后向量重算（真实 Ollama）", vec_changed)
+        else:
+            check("编辑后向量重算（EMBEDDING_ENABLED=0，跳过）", True)
         resp = client.get(f"/api/notes/{note_id}")
         check("编辑生效", resp.json()["note"]["title"] == "冒烟改过的标题")
 
