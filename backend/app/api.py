@@ -13,7 +13,7 @@ import logging
 import re
 import sqlite3
 from typing import Annotated
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -138,6 +138,42 @@ def _history(conn: sqlite3.Connection, conv_id: int) -> list[dict]:
     ]
 
 
+def _parse_organized(content: str) -> dict | None:
+    """assistant 文本消息若是合法整理 JSON（LLM 信息足够时的输出），解析出来供预览卡渲染。
+
+    数据层不动：拍板确认（notes.latest_organized）与 API 仍消费原始字符串，这里只是展示辅助。
+    """
+    try:
+        data = llm.parse_json(content)
+        llm.validate_organized(data)
+        return data
+    except Exception:  # noqa: BLE001 —— 非整理 JSON（追问/降级提示）不解析
+        return None
+
+
+def _material_label(content: str) -> str | None:
+    """fetched_page 材料折叠条文案：从 "Fetched <url> (HTTP n)" 头提取主机名，失败返回 None。"""
+    mm = re.match(r"Fetched (\S+)", content)
+    if mm:
+        host = urlparse(mm.group(1)).netloc or None
+        if host:
+            return host
+    return None
+
+
+def _decorate_messages(msgs: list[sqlite3.Row | dict]) -> list[dict]:
+    """消息视图装饰（聊天页/详情页来源对话）：整理 JSON 预览 + 材料折叠条文案。"""
+    out = []
+    for m in msgs:
+        d = dict(m)
+        if d["role"] == "assistant" and d["kind"] == "text":
+            d["organized"] = _parse_organized(d["content"])
+        if d["kind"] == "fetched_page":
+            d["material_label"] = _material_label(d["content"])
+        out.append(d)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 对话后台整理（§32）：端点只落用户消息立即返回，LLM 回复在事件循环后台生成
 # ---------------------------------------------------------------------------
@@ -238,6 +274,8 @@ def _process_round(conv_id: int) -> None:
             return
 
         # 链接正文抓取（服务端直抓保留，§22.4 #6）：待处理消息含 URL 即抓，失败降级不阻塞
+        # 每条材料落库后立即 commit：轮询在 LLM 回复前就能看到材料（§32「材料先到、回复后到」，
+        # 曾因全部插入集中在末尾一个事务里，用户要等整轮结束才「同时看到」抓取与回复）
         fetched_urls: list[str] = []
         for m in pending:
             for url in fetch.extract_urls(m["content"]):
@@ -248,6 +286,7 @@ def _process_round(conv_id: int) -> None:
                         "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'fetched_page', ?)",
                         (conv_id, msg["content"]),
                     )
+                    conn.commit()
                     fetched_urls.append(url)
                 except fetch.FetchError as e:
                     logger.warning("抓取失败（降级，不阻塞）%s: %s", url, e)
@@ -262,6 +301,7 @@ def _process_round(conv_id: int) -> None:
                     "INSERT INTO messages(conversation_id, role, kind, content) VALUES (?, 'assistant', 'search_result', ?)",
                     (conv_id, content),
                 )
+                conn.commit()  # 同上：搜索结果先可见，LLM 回复后到
                 searched = True
             except web_search.SearchError as e:
                 logger.warning("搜索失败（降级，不阻塞）: %s", e)
@@ -709,13 +749,12 @@ def _note_detail(conn: sqlite3.Connection, note_id: int) -> dict:
         (note_id,),
     ).fetchall()
     for c in convs:
-        msgs = [
-            dict(m)
-            for m in conn.execute(
+        msgs = _decorate_messages(
+            conn.execute(
                 "SELECT id, role, kind, content, created_at FROM messages WHERE conversation_id = ? ORDER BY id",
                 (c["id"],),
-            )
-        ]
+            ).fetchall()
+        )
         conversations.append({**dict(c), "messages": msgs})
     return {"note": note, "duplicate_target": dup_target, "conversations": conversations}
 
@@ -1231,11 +1270,11 @@ def review_page(request: Request, conn: ConnDep, _sess: PageAuthDep) -> HTMLResp
 @router.get("/conversations/{conv_id}", response_class=HTMLResponse)
 def chat_page(request: Request, conv_id: int, conn: ConnDep, _sess: PageAuthDep) -> HTMLResponse:
     conv = _fetch_conversation(conn, conv_id)
-    msgs = _conv_messages(conn, conv_id)
+    msgs = _decorate_messages(_conv_messages(conn, conv_id))
     return render(
         request,
         "chat.html",
-        {"conv": dict(conv), "messages": [dict(m) for m in msgs], "active": "index"},
+        {"conv": dict(conv), "messages": msgs, "active": "index"},
     )
 
 
