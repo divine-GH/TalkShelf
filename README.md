@@ -118,6 +118,19 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 - 访问：`http://127.0.0.1:8000`
 - 想用手机/局域网访问：把 `--host` 改成 `0.0.0.0`（注意同时配置登录，见下）
 
+## PWA（安装到主屏幕，M4）
+
+TalkShelf 是 PWA（设计文档 §38）：支持安装到手机/桌面主屏幕、独立窗口运行（无浏览器地址栏）、
+服务器不可达时显示离线兜底页。**安装前提是 HTTPS 或 localhost**（浏览器对 Service Worker 的安全上下文要求）——
+本地开发用 `http://127.0.0.1:8000` 即可；部署（Caddy / Cloudflare Tunnel，HTTPS）天然满足。
+
+- Android/Windows：Chrome/Edge 打开站点 → 地址栏安装图标或菜单「安装应用 / 添加到主屏幕」；
+- iOS：Safari 分享 →「添加到主屏幕」（用 `apple-touch-icon.png`，见 `static/icons/`）。
+
+离线策略：只缓存静态资源（JS/CSS/图标/离线页），**不缓存页面与 `/api` 响应**
+（私密内容与陈旧数据问题，见设计文档 §38.3）；断网时所有导航统一回退离线页。
+图标如需换图形：`python scripts/gen_icons.py` 重新生成（numpy + 手写 PNG，无额外依赖）。
+
 ## 登录（可选，M3）
 
 `.env` 配置 `AUTH_PASSWORD=你的密码` 即启用登录（页面跳登录页、API 返 401）；不配置则关闭（本地开发零负担）。其它可选配置（会话天数、锁定参数）见 `.env.example`。部署 HTTPS 后把 `AUTH_COOKIE_SECURE=1`（本地 http 必须保持 0）。
@@ -155,9 +168,9 @@ python scripts/eval_retrieval.py
 
 ## 版本与更新记录
 
-- 语义化版本：当前版本见 `backend/app/config.py` 的 `APP_VERSION`（`0.9.0`，与 git tag `v0.9.0` 对应）。
-- `CHANGELOG.md`：Keep a Changelog 格式，每版本一节（`## [X.Y.Z] - 日期`），按版本/日期检索 `grep "\[0.9.0\]" CHANGELOG.md`；发版 = bump 版本号 → CHANGELOG 追加 → `git tag -a vX.Y.Z`。
-- 版本探活：`GET /api/version`（免登录）→ `{"name": "TalkShelf", "version": "0.9.0"}`，部署后确认线上版本用。
+- 语义化版本：当前版本见 `backend/app/config.py` 的 `APP_VERSION`（`0.11.0`，与 git tag `v0.11.0` 对应）。
+- `CHANGELOG.md`：Keep a Changelog 格式，每版本一节（`## [X.Y.Z] - 日期`），按版本/日期检索 `grep "\[0.11.0\]" CHANGELOG.md`；发版 = bump 版本号 → CHANGELOG 追加 → `git tag -a vX.Y.Z`。
+- 版本探活：`GET /api/version`（免登录）→ `{"name": "TalkShelf", "version": "0.11.0"}`，部署后确认线上版本用。
 
 ## 目录结构
 
@@ -169,7 +182,8 @@ backend/app/        config（§3.4 配置收集）| db（建表+FTS 同步+迁�
                     data/（种子笔记 + rag_eval_set.json 检索评测集）
 backend/tests/      pytest（LLM/embedding mock；登录/详情/统计测试）
 templates/          Jinja2 页面（记录/浏览/详情/检索/兴趣回顾/统计/设置/登录，移动端优先，中文）
-static/             样式与少量原生 JS（含 fetch 自动带 CSRF 头）
+static/             样式与少量原生 JS（含 fetch 自动带 CSRF 头）；PWA：manifest.webmanifest
+                    + sw.js（离线兜底）+ offline.html + icons/（192/512/apple-touch）
 scripts/            eval_retrieval.py（检索回归评测）| smoke_e2e.py（真实端到端冒烟，含 M3 链路）
                     smoke_deepseek_search.py（原生搜索冒烟）
 data/               运行数据（不入库）

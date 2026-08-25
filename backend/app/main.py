@@ -61,10 +61,16 @@ async def static_no_cache(request: Request, call_next):
     StaticFiles 不发送 Cache-Control，浏览器会按 Last-Modified 启发式缓存
     （旧 app.js/style.css 可被缓存数小时）——改 UI 后用户拿到旧 JS/CSS，
     「更多功能」按钮无反应、样式不生效（§26.4）。
+
+    PWA（设计文档 §38）：/static/sw.js 额外下发 Service-Worker-Allowed: /——
+    SW 脚本位于 /static/ 下，默认 scope 只到 /static/，注册 {scope: '/'} 时
+    必须显式放行，否则注册被浏览器拒绝（离线兜底失效）。
     """
     response = await call_next(request)
     if request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache"
+        if request.url.path == "/static/sw.js":
+            response.headers["Service-Worker-Allowed"] = "/"
     return response
 
 

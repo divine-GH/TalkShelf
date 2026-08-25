@@ -10,6 +10,32 @@ TalkShelf 的版本更新记录。格式基于 [Keep a Changelog](https://keepac
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.11.0] - 2026-08-26
+
+### Added
+
+- **PWA 支持（M4 一部分，设计文档 §38）**：可安装到主屏幕（Android/iOS）+ 离线兜底，
+  体验接近 App——独立窗口运行（standalone，无浏览器地址栏）、图标、主题色状态栏。
+  - `static/manifest.webmanifest`：应用名/图标/主题色/standalone 展示/`start_url`/`scope`；
+  - `static/sw.js`（Service Worker）：静态资源缓存 + 导航网络优先，服务器不可达时回退
+    离线页 `static/offline.html`（含重试按钮）；`main.py` 对 `/static/sw.js` 下发
+    `Service-Worker-Allowed: /` 头以注册全站 scope；更新机制依赖 `/static` 的
+    no-cache（字节变化即更新），`skipWaiting` + `clients.claim` 立即接管；
+  - 图标：`static/icons/`（192/512 + iOS apple-touch-icon 180）——蓝底白「书架与书」
+    简笔（品牌色 `#2f6fed`），`scripts/gen_icons.py` 用 numpy + stdlib 手写 PNG 生成
+    （无 Pillow 依赖），全部元素位于 maskable 安全区，同一张图声明 any + maskable；
+  - 移动端适配：`base.html` 挂 manifest / theme-color / apple-touch-icon /
+    apple-mobile-web-app-* meta；`style.css` 顶栏与容器加 `env(safe-area-inset-*)`
+    内边距（刘海屏 standalone 显示）。
+  - **明确不做**：不缓存页面 HTML 与 `/api` 响应（私密数据 + 陈旧数据问题，§38.3）；
+    离线笔记队列（后续可加）。PWA 安装要求 HTTPS 或 localhost——部署
+    （Caddy / Cloudflare Tunnel）天然满足。
+
+### Notes
+
+- 新增 `tests/test_pwa.py`（8 例：manifest 字段、SW 头与安全边界、离线页、PNG 签名与
+  尺寸、页面接入）；全量 pytest 通过；ruff check 零告警 + ruff format 通过。
+
 ## [0.10.2] - 2026-08-25
 
 ### Added

@@ -35,6 +35,10 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
+  /* PWA standalone（设计文档 §38）：刘海屏状态栏安全区——env() 非安全环境返回 0 */
+  padding-top: max(10px, env(safe-area-inset-top));
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
   background: var(--card);
   border-bottom: 1px solid var(--border);
 }
@@ -91,6 +95,8 @@ body {
   max-width: 720px;
   margin: 0 auto;
   padding: 16px 14px 60px;
+  /* PWA standalone：底部 Home 条安全区 */
+  padding-bottom: max(60px, calc(env(safe-area-inset-bottom) + 16px));
 }
 
 h1 { font-size: 1.35rem; margin: 8px 0 14px; }

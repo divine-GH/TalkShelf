@@ -6,6 +6,16 @@
   <meta name="csrf-token" content="{{ request.state.csrf_token or '' }}">
   <title>{% block title %}TalkShelf{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
+  <!-- PWA（设计文档 §38）：安装到主屏幕 / 离线兜底。manifest 与图标为安装必需；
+       theme-color 控制状态栏/浏览器 UI 配色；apple-* 是 iOS 添加到主屏幕专用 -->
+  <meta name="theme-color" content="#2f6fed">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="TalkShelf">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
 </head>
 <body>
   <header class="topbar">
@@ -30,6 +40,18 @@
     {% block content %}{% endblock %}
   </main>
   <script src="/static/app.js"></script>
+  <script>
+    // PWA（设计文档 §38）：注册 Service Worker（仅 HTTPS / localhost 安全上下文，非安全环境自动跳过）。
+    // 脚本位于 /static/，靠 main.py 下发的 Service-Worker-Allowed: / 头获得全站 scope；
+    // 注册失败仅影响离线兜底，不影响正常使用（console.warn 不打扰用户）。
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/static/sw.js', {scope: '/'}).catch(function (err) {
+          console.warn('Service Worker 注册失败（不影响正常使用）:', err);
+        });
+      });
+    }
+  </script>
   {% block script %}{% endblock %}
 </body>
 </html>
