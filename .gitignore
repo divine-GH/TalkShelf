@@ -23,3 +23,9 @@ nb-test-*/
 .nb-smoke-e2e-*/
 # 遗留的 ACL 损坏目录（os.mkdir(0o700) 产物，无法在沙箱内删除，等待手动清理）
 _probe700/
+
+# M4 部署（Cloudflare Tunnel 方案，见 deploy/README.md）：二进制与隧道 token 不入库
+deploy/cloudflared/cloudflared.exe
+deploy/cloudflared/tunnel-token.txt
+deploy/logs/
+deploy/*.pid
