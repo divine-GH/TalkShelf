@@ -326,6 +326,30 @@ details.section[open] > summary { margin-bottom: 10px; }
 .msg-thinking .msg-text { color: var(--muted); font-style: italic; animation: thinking-pulse 1.2s ease-in-out infinite; }
 @keyframes thinking-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 .msg-material { max-width: 100%; }
+/* 材料默认折叠（<details> 不带 open）：网页正文动辄上百行，默认收起，点标题展开 */
+.msg-material summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: #f0f2f5;
+  border-left: 3px solid #c3cad4;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.msg-material summary::-webkit-details-marker { display: none; }
+.msg-material summary::after {
+  content: '▸';
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  transition: transform 0.15s ease;
+}
+.msg-material[open] summary { border-radius: 8px 8px 0 0; border-bottom: 1px solid var(--border); }
+.msg-material[open] summary::after { transform: rotate(90deg); }
 .msg-material pre {
   white-space: pre-wrap;
   word-break: break-all;
@@ -333,9 +357,44 @@ details.section[open] > summary { margin-bottom: 10px; }
   color: var(--muted);
   background: #f0f2f5;
   border-left: 3px solid #c3cad4;
-  border-radius: 8px;
+  border-radius: 0 0 8px 8px;
   padding: 8px 10px;
   margin: 0;
+}
+
+/* ---- 聊天页：整理预览卡（LLM 信息足够时输出整理 JSON，展示层渲染为结构化卡片） ---- */
+.msg-organized-card {
+  background: var(--assistant-bubble);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  border-bottom-left-radius: 4px;
+  padding: 10px 13px;
+}
+.org-head { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.org-title { font-weight: 600; word-break: break-word; }
+.org-summary { color: #333; font-size: 0.95rem; margin-top: 3px; }
+.org-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin-top: 6px; }
+.org-cat { font-size: 0.85rem; color: var(--muted); }
+.org-entities { margin-top: 6px; color: var(--muted); font-size: 0.85rem; }
+.org-source {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--primary);
+  font-size: 0.85rem;
+  word-break: break-all;
+  text-decoration: none;
+}
+.org-content { margin-top: 6px; font-size: 0.85rem; }
+.org-content summary { cursor: pointer; color: var(--muted); }
+.org-content-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #333;
+  font-size: 0.92rem;
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-radius: 8px;
 }
 
 .chat-form { display: flex; gap: 8px; margin-top: 10px; }

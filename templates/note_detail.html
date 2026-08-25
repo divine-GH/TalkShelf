@@ -118,9 +118,33 @@
       <summary>对话 #{{ c.id }}{% if c.context_note_id %}（修正对话）{% endif %} · {{ c.created_at }}</summary>
       <div class="messages">
         {% for m in c.messages %}
-        <div class="msg msg-{{ m.role }} msg-{{ m.kind }}">
+        <div class="msg msg-{{ m.role }} msg-kind-{{ m.kind }}">
           {% if m.kind == 'fetched_page' %}
-          <div class="msg-material" title="抓取的网页正文（来源材料）"><pre>{{ m.content }}</pre></div>
+          <details class="msg-material" title="抓取的网页正文（来源材料）">
+            <summary>抓取的网页正文{% if m.material_label %} · {{ m.material_label }}{% endif %}</summary>
+            <pre>{{ m.content }}</pre>
+          </details>
+          {% elif m.organized %}
+          <div class="msg-organized-card">
+            <div class="org-head">
+              <span class="badge kind-{{ m.organized.kind }}">{{ '建议收藏' if m.organized.kind == 'note' else '建议兴趣' }}</span>
+              <span class="badge">重要度 {{ m.organized.importance }}</span>
+            </div>
+            <div class="org-title">{{ m.organized.title }}</div>
+            {% if m.organized.summary %}<div class="org-summary">{{ m.organized.summary }}</div>{% endif %}
+            <div class="org-meta">
+              <span class="org-cat">{{ m.organized.category }}</span>
+              {% for t in m.organized.tags %}<span class="tag">#{{ t }}</span>{% endfor %}
+            </div>
+            {% if m.organized.content %}
+            <details class="org-content"><summary>整理稿正文</summary><div class="org-content-text">{{ m.organized.content }}</div></details>
+            {% endif %}
+            {% if m.organized.entities %}
+            <div class="org-entities">{% for e in m.organized.entities %}<span>{{ e.type }}：{{ e.name }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+            {% endif %}
+            {% if m.organized.source_url %}<a class="org-source" href="{{ m.organized.source_url }}" target="_blank" rel="noopener">来源：{{ m.organized.source_url }}</a>{% endif %}
+            <details class="raw-details"><summary>原始整理 JSON</summary><pre class="raw-text">{{ m.content }}</pre></details>
+          </div>
           {% else %}
           <div class="msg-text">{{ m.content }}</div>
           {% endif %}

@@ -11,10 +11,33 @@
 
   <div id="messages" class="messages">
     {% for m in messages %}
-    <div class="msg msg-{{ m.role }} msg-{{ m.kind }}">
+    {# 外层不带 msg-text：否则 pre-wrap 会把模板缩进/换行渲染成空白（气泡外出现大段空隙） #}
+    <div class="msg msg-{{ m.role }} msg-kind-{{ m.kind }}">
       {% if m.kind == 'fetched_page' %}
-      <div class="msg-material" title="抓取的网页正文（来源材料，不参与检索索引的对话消息）">
+      <details class="msg-material">
+        <summary>抓取的网页正文{% if m.material_label %} · {{ m.material_label }}{% endif %}</summary>
         <pre>{{ m.content }}</pre>
+      </details>
+      {% elif m.organized %}
+      <div class="msg-organized-card">
+        <div class="org-head">
+          <span class="badge kind-{{ m.organized.kind }}">{{ '建议收藏' if m.organized.kind == 'note' else '建议兴趣' }}</span>
+          <span class="badge">重要度 {{ m.organized.importance }}</span>
+        </div>
+        <div class="org-title">{{ m.organized.title }}</div>
+        {% if m.organized.summary %}<div class="org-summary">{{ m.organized.summary }}</div>{% endif %}
+        <div class="org-meta">
+          <span class="org-cat">{{ m.organized.category }}</span>
+          {% for t in m.organized.tags %}<span class="tag">#{{ t }}</span>{% endfor %}
+        </div>
+        {% if m.organized.content %}
+        <details class="org-content"><summary>整理稿正文</summary><div class="org-content-text">{{ m.organized.content }}</div></details>
+        {% endif %}
+        {% if m.organized.entities %}
+        <div class="org-entities">{% for e in m.organized.entities %}<span>{{ e.type }}：{{ e.name }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+        {% endif %}
+        {% if m.organized.source_url %}<a class="org-source" href="{{ m.organized.source_url }}" target="_blank" rel="noopener">来源：{{ m.organized.source_url }}</a>{% endif %}
+        <details class="raw-details"><summary>原始整理 JSON</summary><pre class="raw-text">{{ m.content }}</pre></details>
       </div>
       {% else %}
       <div class="msg-text">{{ m.content }}</div>
@@ -71,22 +94,131 @@
     el.hidden = false;
   }
 
+  // 材料折叠条的主机名：从 "Fetched <url> (HTTP n)" 头提取
+  function materialHost(content) {
+    const mm = content.match(/^Fetched (\S+)/);
+    if (!mm) return null;
+    try { return new URL(mm[1]).hostname || null; } catch (e) { return null; }
+  }
+
+  // 与后端 llm.parse_json + validate_organized 对齐：剥围栏 → JSON.parse → 关键字段校验
+  function parseOrganized(text) {
+    const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const raw = (fence ? fence[1] : text).trim();
+    let d;
+    try { d = JSON.parse(raw); } catch (e) { return null; }
+    if (!d || typeof d !== 'object') return null;
+    if (typeof d.title !== 'string' || !d.title.trim()) return null;
+    if (typeof d.summary !== 'string' || typeof d.category !== 'string') return null;
+    if (!Array.isArray(d.tags) || !d.tags.every(t => typeof t === 'string')) return null;
+    if (d.kind !== 'note' && d.kind !== 'interest') return null;
+    if (![1, 2, 3].includes(d.importance)) return null;
+    return d;
+  }
+
+  // 整理 JSON → 结构化预览卡（LLM 信息足够时的输出，拍板直接用它落库，展示层不再吐原始 JSON）
+  function buildOrganizedCard(div, data, rawText) {
+    const card = document.createElement('div');
+    card.className = 'msg-organized-card';
+    const head = document.createElement('div');
+    head.className = 'org-head';
+    const badge = document.createElement('span');
+    badge.className = 'badge kind-' + data.kind;
+    badge.textContent = data.kind === 'note' ? '建议收藏' : '建议兴趣';
+    head.appendChild(badge);
+    const imp = document.createElement('span');
+    imp.className = 'badge';
+    imp.textContent = '重要度 ' + data.importance;
+    head.appendChild(imp);
+    card.appendChild(head);
+    const title = document.createElement('div');
+    title.className = 'org-title';
+    title.textContent = data.title;
+    card.appendChild(title);
+    if (data.summary) {
+      const sum = document.createElement('div');
+      sum.className = 'org-summary';
+      sum.textContent = data.summary;
+      card.appendChild(sum);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'org-meta';
+    const cat = document.createElement('span');
+    cat.className = 'org-cat';
+    cat.textContent = data.category;
+    meta.appendChild(cat);
+    (data.tags || []).forEach(t => {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = '#' + t;
+      meta.appendChild(tag);
+    });
+    card.appendChild(meta);
+    if (data.content) {
+      const det = document.createElement('details');
+      det.className = 'org-content';
+      const sm = document.createElement('summary');
+      sm.textContent = '整理稿正文';
+      const box = document.createElement('div');
+      box.className = 'org-content-text';
+      box.textContent = data.content;
+      det.appendChild(sm);
+      det.appendChild(box);
+      card.appendChild(det);
+    }
+    if (data.entities && data.entities.length) {
+      const ents = document.createElement('div');
+      ents.className = 'org-entities';
+      ents.textContent = data.entities.map(e => e.type + '：' + e.name).join(' · ');
+      card.appendChild(ents);
+    }
+    if (data.source_url) {
+      const a = document.createElement('a');
+      a.className = 'org-source';
+      a.href = data.source_url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = '来源：' + data.source_url;
+      card.appendChild(a);
+    }
+    const rawDet = document.createElement('details');
+    rawDet.className = 'raw-details';
+    const rawSm = document.createElement('summary');
+    rawSm.textContent = '原始整理 JSON';
+    const rawPre = document.createElement('pre');
+    rawPre.className = 'raw-text';
+    rawPre.textContent = rawText;
+    rawDet.appendChild(rawSm);
+    rawDet.appendChild(rawPre);
+    card.appendChild(rawDet);
+    div.appendChild(card);
+  }
+
   // 新消息插到「思考中」气泡之前（§32：材料先到、回复后到，气泡保持最后一位）
   function appendMsg(role, kind, content) {
     const div = document.createElement('div');
-    div.className = 'msg msg-' + role + ' msg-' + kind;
+    // 外层不用 msg-text 类：空的换行/缩进文本节点会被 pre-wrap 渲染成空白（见模板同注释）
+    div.className = 'msg msg-' + role + ' msg-kind-' + kind;
     if (kind === 'fetched_page') {
-      const box = document.createElement('div');
-      box.className = 'msg-material';
+      const det = document.createElement('details');
+      det.className = 'msg-material';
+      const sm = document.createElement('summary');
+      const host = materialHost(content);
+      sm.textContent = '抓取的网页正文' + (host ? ' · ' + host : '');
       const pre = document.createElement('pre');
       pre.textContent = content;
-      box.appendChild(pre);
-      div.appendChild(box);
+      det.appendChild(sm);
+      det.appendChild(pre);
+      div.appendChild(det);
     } else {
-      const box = document.createElement('div');
-      box.className = 'msg-text';
-      box.textContent = content;
-      div.appendChild(box);
+      const organized = role === 'assistant' ? parseOrganized(content) : null;
+      if (organized) buildOrganizedCard(div, organized, content);
+      else {
+        const box = document.createElement('div');
+        box.className = 'msg-text';
+        box.textContent = content;
+        div.appendChild(box);
+      }
     }
     if (thinkingEl) messagesBox.insertBefore(div, thinkingEl);
     else messagesBox.appendChild(div);
