@@ -146,7 +146,12 @@
             <details class="raw-details"><summary>原始整理 JSON</summary><pre class="raw-text">{{ m.content }}</pre></details>
           </div>
           {% else %}
+          {% if m.role == 'assistant' and m.kind == 'text' %}
+          {# LLM 回复 Markdown 渲染（§37：服务端 |md filter，先转义再渲染，防 XSS） #}
+          <div class="msg-text msg-md">{{ m.content|md }}</div>
+          {% else %}
           <div class="msg-text">{{ m.content }}</div>
+          {% endif %}
           {% endif %}
         </div>
         {% endfor %}

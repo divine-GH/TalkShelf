@@ -19,6 +19,7 @@ from urllib.parse import quote, urlparse
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 
 from . import (
     auth,
@@ -27,6 +28,7 @@ from . import (
     examples,
     fetch,
     llm,
+    mdrender,
     notes,
     providers,
     retrieval,
@@ -41,6 +43,9 @@ router = APIRouter()
 
 TEMPLATES = Jinja2Templates(directory=str(config.BASE_DIR / "templates"))
 TEMPLATES.env.autoescape = True  # Starlette 默认不开 autoescape，必须显式开启
+# LLM 回复 Markdown 渲染（§37）：filter 输出是已转义+白名单的安全 HTML，
+# 必须包 Markup 否则 Jinja autoescape 会二次转义（<strong> 变 &lt;strong&gt;）
+TEMPLATES.env.filters["md"] = lambda t: Markup(mdrender.render_markdown(t))
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +165,25 @@ def _material_label(content: str) -> str | None:
         if host:
             return host
     return None
+
+
+def _message_payload(m: sqlite3.Row | dict) -> dict:
+    """GET 消息 JSON 视图（chat.html / ask.html 轮询渲染，§37）。
+
+    - assistant 文本消息附 ``content_html``（服务端 Markdown 渲染，前端直接 innerHTML，
+      与页面 SSR 的 ``|md`` filter 同源，保证首屏与轮询渲染一致）；
+    - assistant 文本消息附 ``organized``（整理 JSON 服务端统一解析，与 ``_decorate_messages``
+      同源，前端不再维护第二套 parseOrganized；非 assistant / 非整理 JSON 为 None）。
+    """
+    d = dict(m)
+    if d["role"] == "assistant" and d["kind"] == "text":
+        d["content_html"] = mdrender.render_markdown(d["content"])
+        d["organized"] = _parse_organized(d["content"])
+    else:
+        d["content_html"] = None
+        d["organized"] = None
+    keys = ("id", "role", "kind", "content", "created_at", "content_html", "organized")
+    return {k: d[k] for k in keys}
 
 
 def _decorate_messages(msgs: list[sqlite3.Row | dict]) -> list[dict]:
@@ -602,16 +626,7 @@ def list_conversations(conn: ConnDep, _auth: ApiAuthDep) -> dict:
 @router.get("/api/conversations/{conv_id}")
 def get_conversation(conv_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     conv = _fetch_conversation(conn, conv_id)
-    msgs = [
-        {
-            "id": m["id"],
-            "role": m["role"],
-            "kind": m["kind"],
-            "content": m["content"],
-            "created_at": m["created_at"],
-        }
-        for m in _conv_messages(conn, conv_id)
-    ]
+    msgs = [_message_payload(m) for m in _conv_messages(conn, conv_id)]
     return {
         "id": conv["id"],
         "status": conv["status"],
@@ -704,16 +719,7 @@ def list_search_conversations(conn: ConnDep, _auth: ApiAuthDep) -> dict:
 @router.get("/api/search/conversations/{conv_id}")
 def get_search_conversation(conv_id: int, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     conv = _fetch_search_conversation(conn, conv_id)
-    msgs = [
-        {
-            "id": m["id"],
-            "role": m["role"],
-            "kind": m["kind"],
-            "content": m["content"],
-            "created_at": m["created_at"],
-        }
-        for m in _conv_messages(conn, conv_id)
-    ]
+    msgs = [_message_payload(m) for m in _conv_messages(conn, conv_id)]
     return {
         "id": conv["id"],
         "status": conv["status"],

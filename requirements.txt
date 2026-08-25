@@ -5,6 +5,7 @@ uvicorn
 httpx
 numpy
 markdownify
+Markdown
 jinja2
 python-dotenv
 argon2-cffi

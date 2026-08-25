@@ -55,6 +55,40 @@ def test_chat_ui_fixes(client, llm_ok, monkeypatch):
     assert "原始整理 JSON" in page  # 原始 JSON 收进折叠块，仍可查
     assert "建议收藏" in page
 
+    # 4) §37：GET 消息带服务端统一解析的 organized（前端不再维护第二套 parseOrganized）
+    last = conv_last_message(client, conv_id)
+    assert last["organized"]["title"] == "nginx 上传大文件限制"
+    assert last["organized"]["kind"] == "note"
+
+
+def test_chat_assistant_md_rendered(client, llm_ok, monkeypatch):
+    """§37：非整理 JSON 的 assistant 回复按 Markdown 渲染（API content_html + 页面 SSR |md）。"""
+    from app import llm
+
+    monkeypatch.setattr(
+        llm,
+        "_call_chat",
+        lambda *a, **k: (
+            "**加粗** 结论：`code` 示例，参考[链接](https://a.com/x)。<script>alert(1)</script>"
+        ),
+    )
+    conv_id = client.post("/api/conversations", json={"message": "帮我总结一下"}).json()[
+        "conversation_id"
+    ]
+    wait_for(lambda: _reply_arrived(client, conv_id), desc="LLM 回复落库")
+    last = conv_last_message(client, conv_id)
+    assert last["content_html"], "assistant 文本消息应带服务端渲染的 content_html"
+    assert "<strong>加粗</strong>" in last["content_html"]
+    assert "<code>code</code>" in last["content_html"]
+    assert 'href="https://a.com/x"' in last["content_html"]
+    # XSS：原始 HTML 只能作为文本显示（先转义再渲染，不能有可执行的 <script>）
+    assert "<script" not in last["content_html"]
+    assert "&lt;script&gt;" in last["content_html"]
+    # 页面 SSR 与 API 同源渲染（同一 mdrender 函数）
+    page = client.get(f"/conversations/{conv_id}").text
+    assert 'class="msg-text msg-md"' in page
+    assert "<strong>加粗</strong>" in page
+
 
 def test_material_visible_before_reply(client, llm_ok, monkeypatch):
     """§32 材料先到：慢 LLM 期间轮询已能看到抓取材料（commit 提前）。"""

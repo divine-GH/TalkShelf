@@ -10,6 +10,29 @@ TalkShelf 的版本更新记录。格式基于 [Keep a Changelog](https://keepac
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.10.2] - 2026-08-25
+
+### Added
+
+- **LLM 回复消息 Markdown 渲染（§37）**：assistant 气泡（记录对话 / 检索会话 / 笔记详情
+  来源对话）改为服务端渲染 Markdown——加粗/标题/列表/代码块/表格/链接正常显示。
+  渲染管线：先 `html.escape` 转义再渲染（原始 HTML 只能显示为文本，防 XSS）→ 渲染后
+  href 协议白名单（`javascript:`/`data:` 等替换为 `#`）→ 移除 `<img>`；Jinja filter `|md`
+  与 API `content_html` 同源（首屏 SSR 与轮询新消息渲染一致）。新增依赖 `Markdown`
+  （纯 Python，无原生依赖）。
+
+### Changed
+
+- 两个消息 GET 端点（记录对话 / 检索会话）返回服务端统一解析的 `organized`（整理 JSON
+  预览），前端不再维护第二套 `parseOrganized`（仅旧数据兜底保留）。
+- **整理卡整理稿正文、笔记详情「正文」、统计页周报不渲染 Markdown**（用户拍板，见
+  设计文档 §37.3「明确不做」清单）；材料命中 snippet 渲染仍为已知问题 #5（P4）。
+
+### Notes
+
+- 新增 `tests/test_mdrender.py`（10 例，含 XSS 用例）；chat/search 补 `content_html` 断言；
+  全量 pytest 161 个通过；ruff check 零告警 + ruff format 通过。
+
 ## [0.10.1] - 2026-08-25
 
 ### Fixed

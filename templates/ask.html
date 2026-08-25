@@ -196,7 +196,7 @@
     return det;
   }
 
-  function appendMsg(role, kind, content) {
+  function appendMsg(role, kind, content, contentHtml) {
     if (kind === 'search_hits') {
       // 连续检索合并进同一折叠条（P3：同轮多次检索不叠多个雷同标题）
       appendHitsBox(content);
@@ -210,8 +210,10 @@
       div.appendChild(buildFetchedBox(content));
     } else {
       const box = document.createElement('div');
-      box.className = 'msg-text';
-      box.textContent = content;
+      // contentHtml = 服务端渲染的安全 Markdown HTML（§37）；缺失回落纯文本
+      box.className = 'msg-text' + (contentHtml ? ' msg-md' : '');
+      if (contentHtml) box.innerHTML = contentHtml;
+      else box.textContent = content;
       div.appendChild(box);
     }
     // 材料先到、回复后到（§32 同语义）：新消息插到「思考中」气泡之前，气泡保持最后一位
@@ -266,7 +268,7 @@
     data.messages.forEach(function (m) {
       if (m.id <= lastMsgId) return;
       lastMsgId = m.id;
-      appendMsg(m.role, m.kind, m.content);
+      appendMsg(m.role, m.kind, m.content, m.content_html);
       last = m;
     });
     // 待回复判定：存在 user 文本消息晚于最后一条 assistant 文本回复

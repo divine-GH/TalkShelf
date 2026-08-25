@@ -191,6 +191,20 @@ def test_search_conv_no_trigger_skips_web(client, llm_ok, db_path, monkeypatch):
     assert captured["tools"] and len(captured["tools"]) == 1, "只声明 note_search，不含 web_fetch"
 
 
+def test_search_conv_assistant_content_html(client, llm_ok, db_path, monkeypatch):
+    """§37：检索会话 assistant 回复经 API 带服务端渲染 content_html（ask.html JS 渲染用）。"""
+    from app import llm
+
+    monkeypatch.setattr(
+        llm, "_chat_with_tools", lambda *a, **k: ("**答案**：[1] `nginx` 默认 1M", [])
+    )
+    conv_id = start_search(client, "上传文件的坑")
+    last = _last_text(client, conv_id)
+    assert last["content_html"], "assistant 文本消息应带 content_html"
+    assert "<strong>答案</strong>" in last["content_html"]
+    assert "<code>nginx</code>" in last["content_html"]
+
+
 def test_search_conv_llm_down_degraded(client, llm_down, db_path):
     """LLM 不可用：降级错误文本落库（轮次仍结束），会话不 500。
 

@@ -40,7 +40,12 @@
         <details class="raw-details"><summary>原始整理 JSON</summary><pre class="raw-text">{{ m.content }}</pre></details>
       </div>
       {% else %}
+      {% if m.role == 'assistant' and m.kind == 'text' %}
+      {# LLM 回复 Markdown 渲染（§37：服务端 |md filter，先转义再渲染，防 XSS） #}
+      <div class="msg-text msg-md">{{ m.content|md }}</div>
+      {% else %}
       <div class="msg-text">{{ m.content }}</div>
+      {% endif %}
       {% endif %}
     </div>
     {% endfor %}
@@ -195,7 +200,8 @@
   }
 
   // 新消息插到「思考中」气泡之前（§32：材料先到、回复后到，气泡保持最后一位）
-  function appendMsg(role, kind, content) {
+  // contentHtml = 服务端渲染的安全 Markdown HTML（§37）；organized = 服务端解析的整理 JSON 预览
+  function appendMsg(role, kind, content, contentHtml, organized) {
     const div = document.createElement('div');
     // 外层不用 msg-text 类：空的换行/缩进文本节点会被 pre-wrap 渲染成空白（见模板同注释）
     div.className = 'msg msg-' + role + ' msg-kind-' + kind;
@@ -211,12 +217,14 @@
       det.appendChild(pre);
       div.appendChild(det);
     } else {
-      const organized = role === 'assistant' ? parseOrganized(content) : null;
-      if (organized) buildOrganizedCard(div, organized, content);
+      // 服务端 organized 优先（与 SSR 同源）；缺失时回落本地解析（旧数据兜底）
+      const org = organized || (role === 'assistant' ? parseOrganized(content) : null);
+      if (org) buildOrganizedCard(div, org, content);
       else {
         const box = document.createElement('div');
-        box.className = 'msg-text';
-        box.textContent = content;
+        box.className = 'msg-text' + (contentHtml ? ' msg-md' : '');
+        if (contentHtml) box.innerHTML = contentHtml;  // 服务端已转义 + 协议白名单（§37）
+        else box.textContent = content;
         div.appendChild(box);
       }
     }
@@ -255,7 +263,7 @@
       data.messages.forEach(function (m) {
         if (m.id <= newId) return;
         newId = m.id;
-        appendMsg(m.role, m.kind, m.content);
+        appendMsg(m.role, m.kind, m.content, m.content_html, m.organized);
         last = m;
       });
       lastMsgId = newId;
