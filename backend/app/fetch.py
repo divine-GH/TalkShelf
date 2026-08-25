@@ -37,6 +37,30 @@ USER_AGENT = (
 # URL 匹配排除中文/全角标点，避免把后续文本吃进 URL（如 "http://x.cn/2，以及…"）
 _URL_RE = re.compile(r"https?://[^\s<>\"'，。；：！？、（）【】《》「」『』]+")
 
+# 分享/追踪参数黑名单（P2 快照核查）：B 站 App 分享链重定向后的长链携带 buvid（设备指纹）、
+# mid（用户标识）、share_session_id/share_source/share_*、spmid/from_spmid、unique_k、
+# timestamp、up_id、plat_id 等埋点参数；小黑盒分享链带 h_camp/h_src；各站通用 from/referer/ref。
+# 这些参数在落库/展示前剔除，避免设备指纹与用户标识被持久化到 note_materials.url 或外发。
+_TRACKING_PARAMS = {
+    "buvid",
+    "mid",
+    "spmid",
+    "from_spmid",
+    "unique_k",
+    "timestamp",
+    "up_id",
+    "plat_id",
+    "h_camp",
+    "h_src",
+    "from",
+    "referer",
+    "ref",
+}
+
+
+def _is_tracking_param(key: str) -> bool:
+    return key in _TRACKING_PARAMS or key.startswith("share_")
+
 
 class FetchError(Exception):
     """抓取失败（网络错误/SSRF 拒绝/超时/超限）。调用方降级处理，不阻塞记录。"""
@@ -156,6 +180,25 @@ def _extract(html: str, final_url: str) -> tuple[str, str | None]:
     return md, title
 
 
+def strip_tracking_url(url: str) -> str:
+    """剥离 URL 中的常见分享/追踪参数，保留页面路径与功能参数（如 ?p=1）。
+
+    P2：抓取重定向后的最终 URL 常携带 buvid/mid/share_session_id 等 App 分享追踪参数，
+    若随 Fetched 头落库并展示为「来源 ↗」链接，会持久化设备指纹与用户标识。
+    仅剥离黑名单参数，不改变 URL 语义（页面路径、功能参数保留）。
+    """
+    parts = urllib.parse.urlsplit(url)
+    if not parts.query:
+        return url
+    pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    kept = [(k, v) for k, v in pairs if not _is_tracking_param(k)]
+    if len(kept) == len(pairs):
+        return url
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urllib.parse.urlencode(kept), parts.fragment)
+    )
+
+
 def fetch_page(url: str) -> FetchResult:
     """抓取链接正文。失败一律抛 FetchError。"""
     current = url.strip()
@@ -193,14 +236,19 @@ def fetch_page(url: str) -> FetchResult:
 
 
 def fetched_message(result: FetchResult) -> dict:
-    """组装注入对话的 fetched_page 消息（对齐 DSH 输出格式：Fetched <url> (HTTP <n>) 头 + 正文 + 截断提示）。"""
-    head = f"Fetched {result.url} (HTTP {result.status})"
+    """组装注入对话的 fetched_page 消息（对齐 DSH 输出格式：Fetched <url> (HTTP <n>) 头 + 正文 + 截断提示）。
+
+    url 先经 strip_tracking_url 清洗（P2）：Fetched 头与返回 dict 的 url 字段是
+    note_materials.url 与「来源 ↗」链接的唯一来源，源头清洗后下游全部干净。
+    """
+    url = strip_tracking_url(result.url)
+    head = f"Fetched {url} (HTTP {result.status})"
     body = result.markdown
     if result.truncated:
         body += f"\n\n（正文过长，已截断至前 {config.FETCH_TEXT_LIMIT} 字符）"
     return {
         "role": "assistant",
         "kind": "fetched_page",
-        "url": result.url,
+        "url": url,
         "content": head + "\n\n" + body,
     }

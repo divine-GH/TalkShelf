@@ -94,3 +94,43 @@ def test_fetched_message_format():
     msg = fetch.fetched_message(result)
     assert msg["content"].startswith("Fetched https://a.b/c (HTTP 200)")
     assert "已截断" in msg["content"]
+
+
+# ---------------------------------------------------------------------------
+# 分享/追踪参数清洗（P2：b23.tv 短链重定向后携带 buvid/mid/share_* 等，防落库/外发）
+# ---------------------------------------------------------------------------
+
+
+def test_strip_tracking_url_removes_tracking_params():
+    """B 站 App 分享长链：buvid/mid/share_*/spmid/timestamp/up_id/plat_id 等剔除，功能参数保留。"""
+    dirty = (
+        "https://www.bilibili.com/video/BV1sB4y177mo/?buvid=XUD6&from_spmid=search.0.0"
+        "&mid=2u1z3ZaP&p=1&plat_id=114&share_from=ugc&share_session_id=a9e8e55b"
+        "&share_source=COPY&share_tag=s_i&spmid=united.0.0&timestamp=1787242429"
+        "&unique_k=VbGsdko&up_id=7741305"
+    )
+    clean = fetch.strip_tracking_url(dirty)
+    assert clean == "https://www.bilibili.com/video/BV1sB4y177mo/?p=1"
+    assert "buvid" not in clean and "mid=" not in clean and "share_" not in clean
+
+
+def test_strip_tracking_url_keeps_normal_url():
+    """无追踪参数的 URL（无 query / 纯功能参数）原样返回。"""
+    assert fetch.strip_tracking_url("https://a.b/c") == "https://a.b/c"
+    assert fetch.strip_tracking_url("https://a.b/c?p=2&page=3") == "https://a.b/c?p=2&page=3"
+
+
+def test_fetched_message_strips_tracking_url():
+    """fetched_message 的 Fetched 头与 url 字段均使用清洗后的 URL（下游 note_materials 唯一来源）。"""
+    result = fetch.FetchResult(
+        url="https://www.bilibili.com/video/BV1sB4y177mo/?buvid=XYZ&mid=abc&p=1",
+        status=200,
+        title="t",
+        markdown="正文",
+        truncated=False,
+    )
+    msg = fetch.fetched_message(result)
+    assert msg["url"] == "https://www.bilibili.com/video/BV1sB4y177mo/?p=1"
+    assert msg["content"].startswith(
+        "Fetched https://www.bilibili.com/video/BV1sB4y177mo/?p=1 (HTTP 200)"
+    )
