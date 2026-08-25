@@ -10,6 +10,26 @@ TalkShelf 的版本更新记录。格式基于 [Keep a Changelog](https://keepac
 发版流程：bump `backend/app/config.py` 的 `APP_VERSION` → 本文件顶部（`## [Unreleased]` 下方）追加
 版本条目 → `git tag -a vX.Y.Z -m "…"`（中文消息）。
 
+## [0.9.1] - 2026-08-25
+
+### Changed
+
+- **聊天页与来源对话 UI 优化**（针对存档页「记录对话 — TalkShelf.html」反映的四个问题）：
+  - 消息外层不再带 `msg-text` 类：`white-space: pre-wrap` 会把模板缩进/换行渲染成空行，
+    「用户消息 ↔ 抓取材料」之间的大段空白消除（刷新后服务端渲染的消息均有此问题）；
+  - 抓取材料（`fetched_page`）默认折叠为 `<details>` 摘要条（含来源主机名），点击展开，
+    不再整页被网页正文刷屏；
+  - 对话整理回合：每条抓取/搜索结果落库后立即 commit，轮询在 LLM 回复前即可看到材料
+    （§32「材料先到、回复后到」此前因全部插入集中在末尾一个事务而未生效）；
+  - LLM 信息足够时输出的整理 JSON 渲染为结构化预览卡（标题/摘要/分类/标签/重要度/实体/
+    来源/整理稿正文），原始 JSON 收进「原始整理 JSON」折叠块——不再直接展示 JSON 字符串；
+    拍板数据层不变（`notes.latest_organized` 仍解析消息原文）。
+
+### Added
+
+- 回归测试 `tests/test_chat_ui.py`：聊天页渲染结构（外层类名/材料折叠/预览卡）与「材料先到、
+  回复后到」顺序断言。
+
 ## [0.9.0] - 2026-08-24
 
 ### Changed
