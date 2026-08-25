@@ -350,6 +350,10 @@ details.section[open] > summary { margin-bottom: 10px; }
 }
 .msg-material[open] summary { border-radius: 8px 8px 0 0; border-bottom: 1px solid var(--border); }
 .msg-material[open] summary::after { transform: rotate(90deg); }
+/* 同一折叠条内的多次检索块（P3：自动注入 + LLM note_search 重查归组展示） */
+.hit-block { margin: 0; }
+.hit-block + .hit-block { border-top: 1px dashed var(--border); margin-top: 10px; padding-top: 10px; }
+.hit-query { margin: 0 0 6px; font-size: 0.8rem; color: var(--muted); }
 .msg-material pre {
   white-space: pre-wrap;
   word-break: break-all;
