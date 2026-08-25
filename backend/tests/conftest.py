@@ -17,7 +17,7 @@ import time
 
 import numpy as np
 import pytest
-from app import config, db, embedding, llm
+from app import auth, config, db, embedding, llm
 from fastapi.testclient import TestClient
 
 # 固定整理 JSON（§6.2 示例形态；LLM mock 的统一输出）
@@ -97,6 +97,20 @@ def emb_default_on(monkeypatch):
     vector_ok=True 等既有用例会大面积失效。关闭路径由专门测试显式 PUT False 覆盖。
     """
     monkeypatch.setattr(config, "EMBEDDING_ENABLED", True)
+
+
+@pytest.fixture(autouse=True)
+def env_auth_isolated(monkeypatch):
+    """部署 .env 不得污染测试：默认登录关闭 + cookie 非 Secure。
+
+    - config.load_dotenv 读仓库根 .env（部署配置含 AUTH_PASSWORD/AUTH_COOKIE_SECURE=1），
+      不隔离则全部「默认登录关闭」用例变 401/303 大面积失败（实测 108 例）；
+    - TestClient 走 http://testserver，Secure cookie 会被 httpx 丢弃，登录态用例同样受损；
+    - 需要登录的测试用各自 auth_on fixture 显式开启（autouse 先执行、auth_on 后覆盖）。
+    """
+    monkeypatch.setattr(config, "AUTH_PASSWORD", "")
+    monkeypatch.setattr(config, "AUTH_COOKIE_SECURE", False)
+    monkeypatch.setattr(auth, "_password_hash_cache", None)
 
 
 @pytest.fixture
