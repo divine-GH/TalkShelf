@@ -76,6 +76,17 @@
 验证：浏览器访问 `https://note.example.com` 应看到登录页；
 `GET /api/version`（免登录）返回 `{"name": "TalkShelf", "version": "0.10.2"}`（部署后确认线上版本用）。
 
+### 6. 应用侧安全加固（v0.10.2 起自带，无需额外配置）
+
+| 加固项 | 说明 |
+|---|---|
+| `/docs`、`/openapi.json` 关闭 | 公网不暴露 API 形状；本地要查接口文档时把 `main.py` 的 `docs_url` 临时改回 `"/docs"` |
+| 安全响应头 | `X-Content-Type-Options` / `X-Frame-Options` / CSP（含 `frame-ancestors 'none'`，防 iframe 套壳）/ `Referrer-Policy` 全响应下发；HSTS 仅在 HTTPS 场景（CF 边缘透传 `X-Forwarded-Proto: https`）下发 |
+| 改密码吊销其他会话 | 修改密码后除当前会话外的全部会话立即失效（其他设备自动登出） |
+
+> 边缘侧（浏览器操作，与上面互补）：CF 面板 SSL/TLS 开启 **Always Use HTTPS + HSTS**；
+> Security → WAF 建一条 `/api/login` 的 rate limiting 规则（按真实 IP 限速，应用侧限速是全局的）。
+
 ## 运维须知
 
 - **家 PC 离线/重启/换 IP**：无需任何操作——cloudflared 自动重连（前提：设永不休眠 + 重启后跑 `start.ps1`）。

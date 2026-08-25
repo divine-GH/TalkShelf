@@ -1315,7 +1315,11 @@ def failed_notes(conn: ConnDep, _auth: ApiAuthDep) -> dict:
 
 @router.post("/api/settings/password")
 def change_password(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
-    """修改登录密码（§28）：校验当前密码 → 新密码 argon2 哈希落 settings 表（优先于 .env AUTH_PASSWORD）。"""
+    """修改登录密码（§28）：校验当前密码 → 新密码 argon2 哈希落 settings 表（优先于 .env AUTH_PASSWORD）。
+
+    M4 部署加固：改密后吊销除当前会话外的全部会话（其他设备立即登出，
+    防旧密码泄露窗口内的已签发会话长期有效）。
+    """
     if not config.auth_enabled():
         raise HTTPException(status_code=422, detail="未启用登录（.env 配置 AUTH_PASSWORD 后可用）")
     old = body.get("old_password") or ""
@@ -1325,6 +1329,8 @@ def change_password(body: dict, conn: ConnDep, _auth: ApiAuthDep) -> dict:
     if len(new) < 8:
         raise HTTPException(status_code=422, detail="新密码至少 8 位")
     settings.set_value(conn, settings.KEY_AUTH_PASSWORD_HASH, auth.hash_password(new))
+    # 吊销其他会话（保留当前会话：_auth 必为有效 session，见 ApiAuthDep）
+    conn.execute("DELETE FROM sessions WHERE token <> ?", (_auth["token"],))
     conn.commit()
     return {"ok": True}
 
