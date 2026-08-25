@@ -277,6 +277,9 @@
     }
   }
 
+  // 用户消息不在此手动 append：轮询（pollReply）按消息 id 追踪是唯一渲染来源——
+  // 手动渲染后首轮轮询会把刚落库的 user 消息按「id > lastMsgId」再追加一遍，导致重复
+  // （P1：检索页会话 #16 实测同根因；此处同构一并修）。
   document.getElementById('chat-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     const input = document.getElementById('chat-input');
@@ -284,7 +287,6 @@
     if (!msg) return;
     const btn = this.querySelector('button');
     btn.disabled = true;
-    appendMsg('user', 'text', msg);
     input.value = '';
     stopPolling();
     if (!thinkingEl) makeThinking();

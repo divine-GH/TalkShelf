@@ -323,6 +323,10 @@
   });
 
   // ---------- 提问 / 追问 ----------
+  // 用户消息不在此手动 append：消息 id 追踪（renderMessages）是唯一渲染来源——
+  // 手动渲染后首轮轮询会把刚落库的 user 消息按「id > lastMsgId」再追加一遍，导致重复
+  // （P1：检索会话 #16 实测，DOM 6 节点 vs DB 5 行）。「思考中…」即时出现，user 气泡
+  // 在首次 GET 返回后显示（本地延迟极小）。
   document.getElementById('ask-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     const input = document.getElementById('ask-input');
@@ -342,7 +346,6 @@
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
         openChatFor(data.conversation_id);
-        appendMsg('user', 'text', msg);
         makeThinking();
         input.value = '';
         loadHistory().then(function () { /* 列表在后台刷新，返回列表时可见 */ });
@@ -355,7 +358,6 @@
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
-        appendMsg('user', 'text', msg);
         makeThinking();
         input.value = '';
         stopPolling();
