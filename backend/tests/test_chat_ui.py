@@ -27,6 +27,9 @@ def test_chat_ui_fixes(client, llm_ok, monkeypatch):
     wait_for(
         lambda: conv_last_message(client, conv_id).get("kind") == "text",
         desc="LLM 回复落库",
+        # 默认 3s 太紧：机器负载高（本机同时跑 uvicorn 等）时后台异步任务偶发 >3s 才排上线程
+        # （全 mock 路径实测调度到执行约 0.1s，2026-08-25 偶发 4/5 失败，与业务改动无关）
+        timeout=10.0,
     )
     page = client.get(f"/conversations/{conv_id}").text
 
