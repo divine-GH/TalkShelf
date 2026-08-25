@@ -142,11 +142,7 @@ def main() -> int:
             last = msgs[-1] if msgs else {}
             if has_hits and last.get("role") == "assistant" and last.get("kind") == "text":
                 sreply = last["content"]
-                shits = next(
-                    json.loads(m["content"])
-                    for m in msgs
-                    if m["kind"] == "search_hits"
-                )
+                shits = next(json.loads(m["content"]) for m in msgs if m["kind"] == "search_hits")
                 break
             time.sleep(1)
         check("检索会话自动注入完成", shits is not None, f"hits={str(shits)[:80]!r}")
@@ -154,7 +150,11 @@ def main() -> int:
             check("向量检索可用", bool(shits) and shits.get("vector_ok") is True)
         else:
             check("向量检索可用（EMBEDDING_ENABLED=0，跳过）", bool(shits))
-        check("召回来源非空", bool(shits) and bool(shits.get("sources")), f"sources={shits.get('sources') if shits else None}")
+        check(
+            "召回来源非空",
+            bool(shits) and bool(shits.get("sources")),
+            f"sources={shits.get('sources') if shits else None}",
+        )
         check("检索回复非空", sreply is not None and len(sreply) > 20, str(sreply)[:80])
 
         # 4b. 检索会话历史列表（§36）
