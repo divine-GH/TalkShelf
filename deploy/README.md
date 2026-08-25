@@ -72,6 +72,7 @@
 |---|---|---|
 | `AUTH_PASSWORD` | 强密码 | **部署必须设置**（设置即启用登录，未设则公网裸奔） |
 | `AUTH_COOKIE_SECURE` | `1` | HTTPS 下必须；本地 http 保持 `0` |
+| `PUBLIC_URL` | `https://note.example.com` | 公网访问地址（start.ps1 启动提示用；示例，替换为你的域名） |
 
 验证：浏览器访问 `https://note.example.com` 应看到登录页；
 `GET /api/version`（免登录）返回 `{"name": "TalkShelf", "version": "0.10.2"}`（部署后确认线上版本用）。
